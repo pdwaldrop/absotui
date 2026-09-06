@@ -7,8 +7,6 @@
 <h1 align="center">
   <img src="linux/absotui.svg" width="75" valign="middle" alt="Absotui icon"> Absotui
 </h1>
-<p align="center"><strong>Your whole audiobook and podcast library, in a fast, keyboard-driven terminal client.</strong></p>
-
 <p align="center">
     <strong>"ABS" (Audiobookshelf) + "TUI" (terminal user interface)</strong><em> — read it like "absolutely."</em>
 </p>
