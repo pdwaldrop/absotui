@@ -17,7 +17,7 @@
 
 <p align="center">
     A fast, gorgeous, keyboard-driven terminal client for your self-hosted <a href="https://www.audiobookshelf.org/">Audiobookshelf</a> server.
-    Browse by library, series, or collection, blow through chapters, and never lose your place — no mouse, no browser tab, no leaving the terminal.
+    Browse by library, series, or collection, navigate chapters.
 </p>
 
 <p align="center">
@@ -31,26 +31,24 @@
 
 ## ✨ Features
 
-**Never touch a mouse.** Every screen, every action — browsing, playing, searching, downloading, sorting your whole library — is one keypress away, with a complete, always-accurate reference a single <kbd>?</kbd> away too.
-
-**Genuinely fast.** A minimalist Rust 🦀 TUI that opens instantly and stays that way, even against a huge library.
+**Genuinely fast.** A minimalist Rust 🦀 TUI that opens instantly and load quickly, even with huge libraries.
 
 - **Books & podcasts, both first-class:** a unified "New & Unfinished" podcast home, instant mark-as-finished (<kbd>F</kbd>), and autoplay straight into the next unfinished episode
-- **Browse it your way:** flip through your full Library, or jump to Collections and series — grouped, sequence-ordered, one <kbd>Tab</kbd>/<kbd>S</kbd> away
+- **Browse libraries:** flip through your Library, or jump to Collections and series — grouped, sequence-ordered, one <kbd>Tab</kbd>/<kbd>S</kbd> away
 - **See your listening habits:** a full Stats page — streaks, a day-of-week chart, a year-long activity heatmap, recent sessions, and top rankings for what and who you listen to most
 - **Stream or take it offline:** download (<kbd>d</kbd>) any book or episode for offline listening, with a downloaded copy preferred automatically the moment you have one — Auto Download can keep your active listens ready without you thinking about it
-- **Real cover art, right in your terminal:** book and episode artwork rendered inline (Kitty/Sixel/iTerm2 terminals), not just text
+- **Real cover art, right in your terminal:** book and episode artwork rendered inline (Kitty/Ghostty,Sixel/iTerm2 terminals).
 - **Chapter-level navigation:** browse a book's full chapter list inline in Continue Listening, with live per-chapter progress
 - **Desktop integration:** a custom app icon, a taskbar/dock icon on supported terminals, and a window title showing what's playing
-- **Matches your terminal, automatically:** no theme file to maintain — the whole UI just uses whatever color scheme your terminal is already set to
-- **In-app updates:** Settings > Update / Uninstall runs the whole install flow — live progress, fingerprint-or-password auth, and a relaunch on success
+- **Matches your terminal, automatically:** — uses your terminal color scheme/theme
+- **In-app updates:** Settings > Update / Uninstall runs the whole install flow — live in-app
 - **Per-item playback speed:** optionally (Settings > Per-Item Speed) save a separate speed for each book or podcast instead of sharing one across everything
-- **Rock-solid sync:** accurate progress bars even at non-1x speed, a live now-playing marker, and a graceful retry screen instead of the app just closing if your server's briefly unreachable
+- **Rock-solid sync:** Keeps audiobook and podcast episode progress synced with your server.
 
 ---
 
 ## 📌 Project status
-Actively developed, single-maintainer project. Low-risk by design: the Audiobookshelf API is only ever used to retrieve books/podcasts and sync playback progress, so there's no destructive operation to worry about — at worst you'd see a sync hiccup, never data loss. Check [known bugs](known_bugs.md) or [open an issue](https://github.com/pdwaldrop/absotui/issues) if something looks off.
+Actively developed, single-maintainer project. Low-risk by design: the Audiobookshelf API is only ever used to retrieve books/podcasts and sync playback progress. Check [known bugs](known_bugs.md) or [open an issue](https://github.com/pdwaldrop/absotui/issues) if something looks off.
 
 ---
 
