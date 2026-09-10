@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-    <img src="assets/screenshot.png" alt="📖 Screenshot">
+    <img src="assets/demo.gif" alt="📖 Demo">
 </p>
 
 <p align="center">
