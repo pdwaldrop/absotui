@@ -1161,8 +1161,7 @@ let changelog_70 = "Changelog Absotui v0.8.4 (05/09/2026) \n\
          \n\
          Enjoy!\n
          ####\n".to_string();
-let changelog_71 = format!(
-    "Changelog Absotui v{VERSION} (05/09/2026) \n\
+let changelog_71 = "Changelog Absotui v0.8.5 (05/09/2026) \n\
          \n\
          Fixed:\n\
          - The app menu launcher could fail with \"Requested executable
@@ -1172,8 +1171,7 @@ let changelog_71 = format!(
            The launcher now points straight at the installed binary.
          \n\
          Enjoy!\n
-         ####\n"
-);
+         ####\n".to_string();
 
 
     changelog.push_str(&changelog_71);
