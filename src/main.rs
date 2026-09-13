@@ -208,6 +208,16 @@ async fn main() -> Result<()> {
             // once already consumed or while still in flight.
             app.poll_pod_ep_fetch();
 
+            // Merges the background podcast search/feed-fetch, or the create+seed
+            // pair, into the live app the moment either resolves - see
+            // App::poll_podcast_add_result. A no-op unless AppView::PodcastAdd is
+            // actually waiting on one.
+            app.poll_podcast_add_result();
+
+            // Same idea, for a spawned delete_library_item call (podcast remove) -
+            // only reloads the library once the delete has actually finished.
+            app.poll_podcast_remove_result();
+
             // Drain one pending Settings > Update/Uninstall progress event, if any
             // (non-blocking) - keeps that screen's log panel live without a dedicated
             // blocking sub-loop, just reusing this same draw/poll cadence.
@@ -257,45 +267,52 @@ async fn main() -> Result<()> {
             if crossterm::event::poll(Duration::from_millis(200))?
                 && let event::Event::Key(key) = crossterm::event::read()? {
                     app.handle_key(key);
-                    // If the 'R' key is pressed, or a different library was just selected
-                    // in Settings > Library, refresh the app - both need the same full
-                    // reinit to pick up fresh data (and, for a library switch, land back
-                    // on Home in the newly selected library).
-                    if let KeyCode::Char('R') = key.code {
-                        let mut stdout = stdout();
-                        let _ = clear_message(&mut stdout, 3);
-                        let _ = pop_message(&mut stdout, 3, "Refreshing app...");
-                        // Reinitialize app to refresh - a working `app` already exists,
-                        // so on failure the recovery screen offers a way to cancel back
-                        // to it instead of forcing a fix-or-quit loop.
-                        if let Some(new_app) = init_app_with_retry(&mut terminal, true).await? {
-                            app = new_app;
-                        }
-                        let _ = clear_message(&mut stdout, 3);
-                        // pop_message/clear_message write straight to `stdout`, bypassing
-                        // this `terminal`'s diff cache the same way search's separate
-                        // Terminal instance does (see the '/' comment above) - without
-                        // this, the next draw can decide a cell already matches its stale
-                        // cache and skip repainting it, even though clear_message just blanked
-                        // it for real (confirmed live: the player box's bottom border row sits
-                        // exactly 3 rows from the bottom, right where this message prints, and
-                        // silently disappeared until something else forced a full repaint).
-                        let _ = terminal.clear();
-                    } else if app.library_needs_reload {
-                        let mut stdout = stdout();
-                        let _ = clear_message(&mut stdout, 3);
-                        let _ = pop_message(&mut stdout, 3, "Switching library...");
-                        if let Some(new_app) = init_app_with_retry(&mut terminal, true).await? {
-                            app = new_app;
-                        } else {
-                            // Cancelled - stay on the current app/library rather than
-                            // immediately re-triggering this same reinit next iteration.
-                            app.library_needs_reload = false;
-                        }
-                        let _ = clear_message(&mut stdout, 3);
-                        let _ = terminal.clear();
+                    // 'R' just arms the same library_needs_reload flag a Settings >
+                    // Library switch (or a podcast add/remove finishing - see
+                    // poll_podcast_add_result/poll_podcast_remove_result) already uses,
+                    // rather than reinit-ing inline here - the unconditional check below
+                    // is what actually reloads, since it runs every tick regardless of
+                    // whether a key was just pressed. Reloads triggered from a background
+                    // poll (podcast add/remove) resolve between keystrokes, not on one -
+                    // gating the reload on "a key was just pressed" left them sitting
+                    // there, reload pending, until the user happened to press anything.
+                    //
+                    // Gated on is_capturing_free_text: this check runs on the same raw
+                    // KeyEvent regardless of what handle_key already did with it, so
+                    // without this guard, typing a capital R while free-typing (search,
+                    // podcast-add, an update/uninstall password) would trigger a full
+                    // reload mid-keystroke, discarding whatever was being typed.
+                    if let KeyCode::Char('R') = key.code
+                        && !app.is_capturing_free_text() {
+                        app.library_needs_reload = true;
                     }
                 }
+
+            if app.library_needs_reload {
+                let mut stdout = stdout();
+                let _ = clear_message(&mut stdout, 3);
+                let _ = pop_message(&mut stdout, 3, "Refreshing...");
+                // Reinitialize app to refresh - a working `app` already exists, so on
+                // failure the recovery screen offers a way to cancel back to it instead
+                // of forcing a fix-or-quit loop.
+                if let Some(new_app) = init_app_with_retry(&mut terminal, true).await? {
+                    app = new_app;
+                } else {
+                    // Cancelled - stay on the current app/library rather than
+                    // immediately re-triggering this same reinit next iteration.
+                    app.library_needs_reload = false;
+                }
+                let _ = clear_message(&mut stdout, 3);
+                // pop_message/clear_message write straight to `stdout`, bypassing this
+                // `terminal`'s diff cache the same way search's separate Terminal
+                // instance does (see the '/' comment above) - without this, the next
+                // draw can decide a cell already matches its stale cache and skip
+                // repainting it, even though clear_message just blanked it for real
+                // (confirmed live: the player box's bottom border row sits exactly 3
+                // rows from the bottom, right where this message prints, and silently
+                // disappeared until something else forced a full repaint).
+                let _ = terminal.clear();
+            }
 
             tokio::time::sleep(Duration::from_millis(50)).await;
         }

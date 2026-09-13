@@ -34,6 +34,7 @@
 **Genuinely fast.** A minimalist TUI, built in Rust, that opens instantly and loads quickly, even with huge libraries.
 
 - **Books & podcasts, both first-class:** a unified "New & Unfinished" podcast home, instant mark-as-finished (<kbd>F</kbd>), and auto-play straight into the next unfinished episode
+- **Manage podcast subscriptions:** add a show by name or a direct RSS URL (<kbd>A</kbd>) with real cover art and description while you browse results, or remove one (<kbd>C</kbd>) — all from Library, no separate screen
 - **Browse libraries:** flip through your Library, or jump to Collections and series — grouped, sequence-ordered, one <kbd>Tab</kbd>/<kbd>S</kbd> away
 - **See your listening habits:** a full Stats page — streaks, a day-of-week chart, a year-long activity heat-map, recent sessions, and top rankings for what and who you listen to most
 - **Stream or take it offline:** download (<kbd>d</kbd>) any book or episode for offline listening, with a downloaded copy preferred automatically the moment you have one — Auto Download can keep your active listens ready without you thinking about it
@@ -137,10 +138,7 @@ Files installed — same as above (`.env`, `config.toml`, `absotui.log`, `db.sql
 ---
 
 ## 🛠️ Roadmap
-Recent work: a refreshed app icon; and a broad bug/optimization pass across the Stats and Collections/Series screens — fixed a book-playback position bug, a misleading "Incorrect password" error during Update, a Library series-grouping display bug, plus several efficiency and code-quality cleanups.
-
-**Under consideration:**
-- Managing podcast subscriptions from the app (add/remove)
+Recent work: podcast subscription management (add by name or RSS URL, remove) directly from Library.
 
 See [known bugs](known_bugs.md) for what's still outstanding.
 

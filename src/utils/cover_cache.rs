@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use color_eyre::eyre::Result;
 use crate::api::library_items::get_cover::get_cover;
 use crate::api::library_items::get_audio_file_range::get_audio_file_prefix;
+use crate::utils::http_client::api_client;
 
 fn covers_dir() -> PathBuf {
     let config_home_path = env::var("XDG_CONFIG_HOME").map_or_else(|_| {
@@ -51,6 +52,28 @@ pub async fn fetch_and_cache_cover(token: String, item_id: String, server_addres
     }
 
     let bytes = get_cover(&token, &item_id, &server_address).await?;
+
+    std::fs::create_dir_all(covers_dir())?;
+    std::fs::write(path, bytes)?;
+
+    Ok(())
+}
+
+/// Fetches an arbitrary public image URL (e.g. iTunes artwork for a podcast search
+/// result that isn't a library item yet, so has no Audiobookshelf item id/cover
+/// endpoint of its own) and writes it to the local cache under `cache_key`, if not
+/// already cached. Unauthenticated - unlike `fetch_and_cache_cover`, this never sends
+/// the server's own bearer token, since the URL points at a third party (iTunes), not
+/// the configured Audiobookshelf server.
+pub async fn fetch_and_cache_external_cover(url: String, cache_key: String) -> Result<()> {
+    let path = cover_cache_path(&cache_key);
+    if path.exists() {
+        return Ok(());
+    }
+
+    let client = api_client();
+    let response = client.get(url).send().await?;
+    let bytes = response.bytes().await?;
 
     std::fs::create_dir_all(covers_dir())?;
     std::fs::write(path, bytes)?;

@@ -1172,8 +1172,30 @@ let changelog_71 = "Changelog Absotui v0.8.5 (05/09/2026) \n\
          \n\
          Enjoy!\n
          ####\n".to_string();
+let changelog_72 = format!(
+    "Changelog Absotui v{VERSION} (12/09/2026) \n\
+         \n\
+         New:\n\
+         - Manage podcast subscriptions right from Library: press A to
+           add a show by name or a direct RSS feed URL - browse results
+           with real cover art and description, pick how many recent
+           episodes to grab, and you're subscribed. Press C to remove
+           one, with a choice to keep or delete any downloaded episodes.
+         \n\
+         Fixed:\n\
+         - Typing a capital R anywhere free-text (search, this new add-
+           podcast box, an update/uninstall password) could trigger a
+           full app reload mid-keystroke, discarding what was typed.
+         - Removing or adding a podcast could leave Library showing
+           stale data until you happened to press another key - it now
+           refreshes on its own the moment the change actually finishes.
+         \n\
+         Enjoy!\n
+         ####\n"
+);
 
 
+    changelog.push_str(&changelog_72);
     changelog.push_str(&changelog_71);
     changelog.push_str(&changelog_70);
     changelog.push_str(&changelog_69);

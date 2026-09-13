@@ -14,10 +14,14 @@ use crate::api::libraries::get_all_books::get_all_books;
 use crate::api::libraries::get_all_collections::get_all_collections;
 use crate::api::me::get_listening_stats::get_listening_stats;
 use crate::api::libraries::get_all_libraries::get_all_libraries;
+use crate::api::podcasts::search_podcast::{search_podcast, PodcastSearchResult};
+use crate::api::podcasts::get_podcast_feed::get_podcast_feed;
+use crate::api::library_items::delete_library_item::delete_library_item;
 use crate::api::library_items::get_pod_ep::{get_pod_ep, Root as GetPodEpRoot};
 use crate::logic::handle_input::handle_l_book::handle_l_book;
 use crate::logic::handle_input::handle_l_pod::handle_l_pod;
 use crate::logic::handle_input::handle_l_pod_home::handle_l_pod_home;
+use crate::logic::handle_input::handle_add_podcast::create_and_seed_podcast;
 use crate::config::{ConfigFile, load_config};
 use crate::db::crud::{get_is_show_key_bindings, update_is_show_key_bindings, get_is_speed_adjusted_time, update_is_speed_adjusted_time, update_is_podcast_autoplay, delete_user, update_id_selected_lib, get_listening_session, get_is_vlc_running, update_is_per_item_speed, update_is_finished, get_is_auto_download, update_is_auto_download, update_pending_seek, update_login_err};
 use crate::api::server::refresh_token::{maybe_refresh_token, RefreshOutcome};
@@ -90,6 +94,44 @@ pub enum AppView {
     // Read-only listening-stats dashboard - user-level (not scoped to the current
     // library), same as the Audiobookshelf endpoint it's built from.
     Stats,
+    // Add-a-podcast-subscription flow, entered from AppView::Library (podcast mode,
+    // `A` key) and always exited back to it - never reachable via Tab, so it never
+    // becomes a second "podcast management" destination alongside Library. Which of
+    // its several stages is showing is tracked by `podcast_add_stage`, the same way
+    // AppView::SettingsUpdateUninstall hosts multiple stages via `update_uninstall_stage`.
+    PodcastAdd,
+}
+
+// Sub-state for the AppView::PodcastAdd screen. `Input` renders as an overlay on top
+// of whatever's behind it (checked early in handle_key, same as the `/` search
+// overlay's `is_search_active`) - the other three stages take over the whole screen.
+#[derive(Clone)]
+pub enum PodcastAddStage {
+    Input,
+    Loading,
+    // Selection lives in the top-level `list_state_podcast_search_results`, same as
+    // every other list in this app (see `select_next`/`select_previous`) - not
+    // embedded here, so those generic helpers don't need a special case for this one.
+    Results(Vec<crate::api::podcasts::search_podcast::PodcastSearchResult>),
+    // `episode_count` cycles through the 3/5/10 presets with Left/Right before Enter
+    // confirms - see `check_new_episodes`: a freshly-created podcast has zero
+    // episodes until that call runs, so this is asked before create_podcast fires,
+    // not after.
+    Confirm { chosen: Box<crate::api::podcasts::search_podcast::PodcastSearchResult>, episode_count: u32 },
+}
+
+// Outcome of the background search_podcast/get_podcast_feed call spawned from the
+// PodcastAddStage::Input -> Loading transition. An owned Vec either way (a direct-URL
+// add wraps its single feed result in a one-item Vec) so Loading's poll and Results'
+// render path don't need to know which of the two calls actually ran.
+pub enum PodcastAddOutcome {
+    Found(Vec<crate::api::podcasts::search_podcast::PodcastSearchResult>),
+    // The create_podcast -> check_new_episodes pair (spawned from the Confirm stage)
+    // finished successfully - carries how many episodes check_new_episodes actually
+    // reported back, which may be fewer than the chosen preset if the feed itself
+    // has fewer episodes than that.
+    Created(usize),
+    Failed(String),
 }
 
 // Sub-state for the AppView::SettingsUpdateUninstall screen. `Failed` is the only
@@ -168,6 +210,28 @@ pub struct App {
     // selection, so (unlike `active_collection`) it persists across Tab navigation
     // for the App's lifetime, same as the podcast Home `D` sort-order toggle.
     pub is_library_grouped_by_series: bool,
+    // Podcast subscription management (AppView::PodcastAdd, `C` remove on Library).
+    // `None` means the add flow isn't active at all - same role `is_search_active`
+    // plays for search, just an `Option<Stage>` instead of a bool since this flow has
+    // more than one stage. The textarea is a separate field (not embedded in the enum)
+    // for the same reason `search_textarea` is separate from `is_search_active`.
+    pub podcast_add_stage: Option<PodcastAddStage>,
+    pub podcast_add_textarea: ratatui_textarea::TextArea<'static>,
+    pub podcast_add_receiver: Option<tokio::sync::oneshot::Receiver<PodcastAddOutcome>>,
+    pub list_state_podcast_search_results: ListState,
+    // Set on a Failed outcome, shown on the Input stage until the next attempt (or
+    // the flow is cancelled) - cleared whenever Input is (re-)entered.
+    pub podcast_add_error: Option<String>,
+    // Gates an inline y/n-style confirm (`s`/`h`/`n`) over the current Library screen
+    // when removing a subscribed podcast - same shape as `account_removal_confirm`,
+    // just a 3-way choice (soft/hard/cancel) instead of 2-way.
+    pub podcast_remove_confirm: bool,
+    // Set only while a spawned delete_library_item call is in flight - see
+    // poll_podcast_remove_result. Waiting on this before setting
+    // library_needs_reload matters: setting it immediately (before the DELETE
+    // request has actually completed) would let the reload race ahead and reload
+    // the library while the item is still there server-side.
+    pub podcast_remove_receiver: Option<tokio::sync::oneshot::Receiver<()>>,
     // User-level listening stats (AppView::Stats) - not scoped to the current
     // library, same as the Audiobookshelf endpoint it's built from.
     pub stats_summary: StatsSummary,
@@ -1037,6 +1101,13 @@ impl App {
         series_name_library,
         series_sequence_library,
         is_library_grouped_by_series,
+        podcast_add_stage: None,
+        podcast_add_textarea: ratatui_textarea::TextArea::default(),
+        podcast_add_receiver: None,
+        list_state_podcast_search_results: ListState::default(),
+        podcast_add_error: None,
+        podcast_remove_confirm: false,
+        podcast_remove_receiver: None,
         stats_summary,
         ids_search_book,
         is_search_active,
@@ -1387,6 +1458,181 @@ pub fn handle_key(&mut self, key: KeyEvent) {
         }
     }
 
+    // Podcast subscription add flow (`A` on Library, podcast mode) owns every key
+    // itself while active, same reasoning as the blocks above - Input is checked
+    // here (like the `/` search overlay's is_search_active) before view_state has
+    // even changed to PodcastAdd yet; Loading/Results/Confirm all run with
+    // view_state already PodcastAdd, so the big match below never sees this view
+    // (see its own no-op arm).
+    if let Some(stage) = self.podcast_add_stage.take() {
+        match stage {
+            PodcastAddStage::Input => {
+                match key.code {
+                    KeyCode::Enter => {
+                        let query = self.podcast_add_textarea.lines().join("\n").trim().to_string();
+                        if query.is_empty() {
+                            self.podcast_add_stage = Some(PodcastAddStage::Input);
+                            return;
+                        }
+                        self.podcast_add_error = None;
+                        self.podcast_add_stage = Some(PodcastAddStage::Loading);
+                        self.view_state = AppView::PodcastAdd;
+                        let token = self.token.clone();
+                        let server_address = self.server_address.clone();
+                        let (tx, rx) = tokio::sync::oneshot::channel();
+                        self.podcast_add_receiver = Some(rx);
+                        tokio::spawn(async move {
+                            let Some(token) = token else {
+                                let _ = tx.send(PodcastAddOutcome::Failed("Not logged in".to_string()));
+                                return;
+                            };
+                            let outcome = if query.starts_with("http://") || query.starts_with("https://") {
+                                match get_podcast_feed(&query, &token, server_address).await {
+                                    Ok(podcast) => {
+                                        let result = PodcastSearchResult {
+                                            title: podcast.metadata.title,
+                                            artist_name: podcast.metadata.author,
+                                            description: podcast.metadata.description,
+                                            description_plain: podcast.metadata.description_plain,
+                                            cover: podcast.metadata.image,
+                                            feed_url: podcast.metadata.feed_url.or(Some(query.clone())),
+                                            track_count: Some(podcast.num_episodes),
+                                            genres: podcast.metadata.categories,
+                                            ..Default::default()
+                                        };
+                                        PodcastAddOutcome::Found(vec![result])
+                                    }
+                                    Err(e) => PodcastAddOutcome::Failed(e.to_string()),
+                                }
+                            } else {
+                                match search_podcast(&query, &token, server_address).await {
+                                    Ok(results) => PodcastAddOutcome::Found(results),
+                                    Err(e) => PodcastAddOutcome::Failed(e.to_string()),
+                                }
+                            };
+                            let _ = tx.send(outcome);
+                        });
+                    }
+                    KeyCode::Esc => {
+                        self.podcast_add_error = None;
+                    }
+                    _ => {
+                        self.podcast_add_textarea.input(key);
+                        self.podcast_add_stage = Some(PodcastAddStage::Input);
+                    }
+                }
+                return;
+            }
+            PodcastAddStage::Loading => {
+                if !matches!(key.code, KeyCode::Esc) {
+                    self.podcast_add_stage = Some(PodcastAddStage::Loading);
+                    return;
+                }
+                self.podcast_add_receiver = None;
+                self.view_state = AppView::Library;
+                return;
+            }
+            PodcastAddStage::Results(results) => {
+                match key.code {
+                    KeyCode::Esc => {
+                        self.view_state = AppView::Library;
+                    }
+                    KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
+                        if let Some(chosen) = self.list_state_podcast_search_results.selected().and_then(|i| results.get(i)) {
+                            self.podcast_add_stage = Some(PodcastAddStage::Confirm { chosen: Box::new(chosen.clone()), episode_count: 5 });
+                        } else {
+                            self.podcast_add_stage = Some(PodcastAddStage::Results(results));
+                        }
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        self.podcast_add_stage = Some(PodcastAddStage::Results(results));
+                        self.select_next();
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        self.podcast_add_stage = Some(PodcastAddStage::Results(results));
+                        self.select_previous();
+                    }
+                    _ => {
+                        self.podcast_add_stage = Some(PodcastAddStage::Results(results));
+                    }
+                }
+                return;
+            }
+            PodcastAddStage::Confirm { chosen, episode_count } => {
+                match key.code {
+                    KeyCode::Esc => {
+                        self.view_state = AppView::Library;
+                    }
+                    KeyCode::Left => {
+                        let episode_count = match episode_count { 5 => 3, 10 => 5, _ => 10 };
+                        self.podcast_add_stage = Some(PodcastAddStage::Confirm { chosen, episode_count });
+                    }
+                    KeyCode::Right => {
+                        let episode_count = match episode_count { 3 => 5, 5 => 10, _ => 3 };
+                        self.podcast_add_stage = Some(PodcastAddStage::Confirm { chosen, episode_count });
+                    }
+                    KeyCode::Enter => {
+                        self.podcast_add_stage = Some(PodcastAddStage::Loading);
+                        let token = self.token.clone();
+                        let server_address = self.server_address.clone();
+                        let library_id = self.id_selected_lib.clone();
+                        let (tx, rx) = tokio::sync::oneshot::channel();
+                        self.podcast_add_receiver = Some(rx);
+                        tokio::spawn(async move {
+                            let Some(token) = token else {
+                                let _ = tx.send(PodcastAddOutcome::Failed("Not logged in".to_string()));
+                                return;
+                            };
+                            let outcome = create_and_seed_podcast(*chosen, episode_count, library_id, token, server_address).await;
+                            let _ = tx.send(outcome);
+                        });
+                    }
+                    _ => {
+                        self.podcast_add_stage = Some(PodcastAddStage::Confirm { chosen, episode_count });
+                    }
+                }
+                return;
+            }
+        }
+    }
+
+    // Removing a subscribed podcast (`C` on Library, podcast mode) - a 3-way inline
+    // confirm over the current Library screen, same reasoning as
+    // account_removal_confirm's own doc comment (l/→, also plain navigation
+    // elsewhere, must not be able to reach the actual delete a second time by
+    // accident).
+    if matches!(self.view_state, AppView::Library) && self.podcast_remove_confirm {
+        match key.code {
+            KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Char('h') | KeyCode::Char('H') => {
+                let hard = matches!(key.code, KeyCode::Char('h') | KeyCode::Char('H'));
+                self.podcast_remove_confirm = false;
+                if let Some(item_id) = self.selected_library_book_index().and_then(|i| self.ids_library.get(i)).cloned() {
+                    let token = self.token.clone();
+                    let server_address = self.server_address.clone();
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    self.podcast_remove_receiver = Some(rx);
+                    tokio::spawn(async move {
+                        let Some(token) = token else {
+                            let _ = tx.send(());
+                            return;
+                        };
+                        if let Err(e) = delete_library_item(&item_id, hard, &token, server_address).await {
+                            log::error!("[podcast_remove_confirm] {item_id}: {e}");
+                        }
+                        // Reload regardless of success/failure - a failed delete leaves
+                        // the library unchanged, so the "reload" just confirms that.
+                        let _ = tx.send(());
+                    });
+                }
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                self.podcast_remove_confirm = false;
+            }
+            _ => {}
+        }
+        return;
+    }
+
     match key.code {
         // PLAYER //
         // toggle playback/pause
@@ -1517,6 +1763,31 @@ pub fn handle_key(&mut self, key: KeyEvent) {
             self.is_library_grouped_by_series = !self.is_library_grouped_by_series;
             // Row layout just changed shape entirely (headers spliced in/out).
             self.list_state_library.select(Some(0));
+        }
+
+        // Add a podcast subscription - opens the same kind of text-input overlay as
+        // `/` search, but for a real server-side search/feed-fetch rather than a
+        // client-side filter of what's already in the library (see PodcastAddStage's
+        // own doc comment). Lives on Library itself, not a separate destination -
+        // see known_bugs.md/the plan behind this feature for why that matters.
+        KeyCode::Char('A') if self.is_podcast && matches!(self.view_state, AppView::Library) => {
+            self.podcast_add_textarea = ratatui_textarea::TextArea::default();
+            self.podcast_add_textarea.set_block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Add podcast (name or RSS URL)")
+                    .border_style(Style::new().fg(crate::ui::theme::ACCENT_KEY))
+            );
+            self.podcast_add_error = None;
+            self.podcast_add_stage = Some(PodcastAddStage::Input);
+        }
+
+        // Remove a subscribed podcast - arms the inline confirm handled early in
+        // this function, same reasoning as account_removal_confirm's own comment.
+        KeyCode::Char('C') if self.is_podcast && matches!(self.view_state, AppView::Library) => {
+            if self.selected_library_book_index().is_some() {
+                self.podcast_remove_confirm = true;
+            }
         }
 
         // Download (or remove the local copy of) the selected book, or podcast episode,
@@ -1966,6 +2237,10 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                 // returns before this match is ever reached while Keymap is active.
                 AppView::Keymap => {}
                 AppView::Stats => {}
+                // Unreachable in practice - PodcastAdd's own early-intercept block in
+                // handle_key owns l/Right/Enter itself (Results -> Confirm, or Confirm
+                // -> actually creating the subscription), same reasoning as Keymap above.
+                AppView::PodcastAdd => {}
                 AppView::Library => {
                     if self.is_podcast {
                         if let Some(index) = selected_library {
@@ -2194,6 +2469,11 @@ fn toggle_view(&mut self) {
         // Tab deliberately falls through to here from the Keymap guard in
         // handle_key - this is what makes Tab close Keymap back to Home.
         AppView::Keymap => AppView::Home,
+        // Unreachable in practice - PodcastAdd's own early-intercept block in
+        // handle_key owns every key while active, Tab included, so this never runs.
+        // Falls back to Library (not Home) since that's the one place this flow is
+        // ever entered from and ever returns to.
+        AppView::PodcastAdd => AppView::Library,
 
     };
 
@@ -2383,6 +2663,16 @@ pub fn select_next(&mut self) {
         // Unreachable - j/Down never reach this while Keymap is active.
         AppView::Keymap => {}
         AppView::Stats => {}
+        AppView::PodcastAdd => {
+            if let Some(PodcastAddStage::Results(results)) = &self.podcast_add_stage
+                && let Some(selected) = self.list_state_podcast_search_results.selected() {
+                    if selected + 1 < results.len() {
+                        self.list_state_podcast_search_results.select_next();
+                    } else {
+                        self.list_state_podcast_search_results.select_first();
+                    }
+            }
+        }
     }
 }
 
@@ -2403,6 +2693,7 @@ pub fn select_previous(&mut self) {
         AppView::SettingsAutoDownload => self.list_state_settings_auto_download.select_previous(),
         AppView::Keymap => {}
         AppView::Stats => {}
+        AppView::PodcastAdd => self.list_state_podcast_search_results.select_previous(),
     }
 }
 
@@ -2423,6 +2714,7 @@ pub fn select_first(&mut self) {
         AppView::SettingsAutoDownload => self.list_state_settings_auto_download.select_first(),
         AppView::Keymap => {}
         AppView::Stats => {}
+        AppView::PodcastAdd => self.list_state_podcast_search_results.select_first(),
     }
 }
 
@@ -2460,6 +2752,82 @@ pub fn select_last(&mut self) {
         AppView::SettingsAutoDownload => self.list_state_settings_auto_download.select(Some(1)),
         AppView::Keymap => {}
         AppView::Stats => {}
+        AppView::PodcastAdd => {
+            if let Some(PodcastAddStage::Results(results)) = &self.podcast_add_stage {
+                self.list_state_podcast_search_results.select(results.len().checked_sub(1));
+            }
+        }
+    }
+}
+
+// Whether some part of the app currently owns free-text keyboard input - the `/`
+// search box, the podcast-add Input stage, or Update/Uninstall's password prompt.
+// main.rs's own top-level `R` (refresh) handling runs completely independently of
+// `handle_key` (it checks the same raw KeyEvent again afterward, regardless of what
+// handle_key already did with it) - without this guard, typing a capital R into any
+// of these free-text fields triggers a full app reload mid-keystroke, discarding
+// whatever was being typed. Real, pre-existing gap for search/password too, not
+// just the podcast-add flow that surfaced it.
+pub fn is_capturing_free_text(&self) -> bool {
+    self.is_search_active
+        || matches!(self.podcast_add_stage, Some(PodcastAddStage::Input))
+        || (matches!(self.view_state, AppView::SettingsUpdateUninstall) && matches!(self.update_uninstall_stage, UpdateUninstallStage::Password(_)))
+}
+
+// Non-blocking check for the background search_podcast/get_podcast_feed call (from
+// PodcastAddStage::Input) or the create_podcast+check_new_episodes pair (from
+// PodcastAddStage::Confirm) - both go through the same receiver field, one at a
+// time, since the flow is strictly sequential. Called from main.rs's render loop
+// every iteration, same shape as poll_pod_ep_fetch below.
+pub fn poll_podcast_add_result(&mut self) {
+    let Some(rx) = self.podcast_add_receiver.as_mut() else { return };
+    match rx.try_recv() {
+        Ok(PodcastAddOutcome::Found(results)) => {
+            self.podcast_add_receiver = None;
+            if results.is_empty() {
+                self.podcast_add_error = Some("No podcasts found - try a different search, or paste a direct RSS feed URL".to_string());
+                self.podcast_add_stage = Some(PodcastAddStage::Input);
+            } else {
+                self.list_state_podcast_search_results.select(Some(0));
+                self.podcast_add_stage = Some(PodcastAddStage::Results(results));
+            }
+        }
+        Ok(PodcastAddOutcome::Created(episode_count)) => {
+            self.podcast_add_receiver = None;
+            self.podcast_add_stage = None;
+            log::info!("[poll_podcast_add_result] subscription created, {episode_count} episode(s) downloaded");
+            self.view_state = AppView::Library;
+            self.library_needs_reload = true;
+        }
+        Ok(PodcastAddOutcome::Failed(message)) => {
+            self.podcast_add_receiver = None;
+            self.podcast_add_error = Some(message);
+            self.podcast_add_stage = Some(PodcastAddStage::Input);
+        }
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
+        Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+            // Sender dropped without sending - shouldn't happen (the spawned task
+            // always sends before finishing) but stop polling a receiver that can
+            // never resolve rather than checking it forever.
+            self.podcast_add_receiver = None;
+            self.podcast_add_error = Some("Something went wrong - please try again".to_string());
+            self.podcast_add_stage = Some(PodcastAddStage::Input);
+        }
+    }
+}
+
+// Non-blocking check for the background delete_library_item call spawned from the
+// podcast_remove_confirm handler - only sets library_needs_reload once the delete
+// has actually finished (see podcast_remove_receiver's own doc comment for why
+// that ordering matters). Called from main.rs's render loop every iteration.
+pub fn poll_podcast_remove_result(&mut self) {
+    let Some(rx) = self.podcast_remove_receiver.as_mut() else { return };
+    match rx.try_recv() {
+        Ok(()) | Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+            self.podcast_remove_receiver = None;
+            self.library_needs_reload = true;
+        }
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
     }
 }
 

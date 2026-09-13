@@ -1,5 +1,5 @@
 use crate::App;
-use crate::app::{AppView, HomeRow, LibraryRow, UpdateUninstallStage, SETTINGS_ABOUT, SETTINGS_UPDATE_UNINSTALL};
+use crate::app::{AppView, HomeRow, LibraryRow, UpdateUninstallStage, PodcastAddStage, SETTINGS_ABOUT, SETTINGS_UPDATE_UNINSTALL};
 use crate::logic::update_uninstall::Action;
 use crate::api::libraries::get_library_perso_view_pod::Chapter;
 use ratatui::{
@@ -17,7 +17,7 @@ use crate::utils::format_size::format_sizes;
 use crate::db::crud::{get_listening_session, get_is_podcast_autoplay, get_is_vlc_running, get_is_per_item_speed, get_is_auto_download};
 use crate::player::integrated::player_info::{format_time, find_current_chapter};
 use crate::utils::html_to_text::html_to_lines;
-use crate::utils::cover_cache::{cover_cache_path, fetch_and_cache_cover, fetch_and_cache_episode_cover};
+use crate::utils::cover_cache::{cover_cache_path, fetch_and_cache_cover, fetch_and_cache_episode_cover, fetch_and_cache_external_cover};
 use crate::utils::changelog::latest_changelog_entry;
 use chrono::Datelike;
 use crate::ui::theme;
@@ -60,6 +60,7 @@ impl Widget for &mut App {
             AppView::Keymap => self.render_keymap(area, buf),
             AppView::Collections => self.render_collections(area, buf),
             AppView::Stats => self.render_stats(area, buf),
+            AppView::PodcastAdd => self.render_podcast_add(area, buf),
         }
         // Home/Library/Settings/SearchBook/PodcastEpisode render the overlay
         // themselves, anchored to their own Info box - see render_search_overlay's
@@ -318,8 +319,12 @@ impl App {
         let tab_target = if self.collection_names.is_empty() { "Stats" } else { "Collections" };
         let back_hint = self.active_collection.is_some().then_some(("h", "Back to collections"));
 
-        let _text_render_footer = if self.is_podcast {
-            let mut hints = vec![("l/→", "Episodes"), ("/", "Search")];
+        let _text_render_footer = if self.podcast_remove_confirm {
+            // Matches account_removal_confirm's own footer swap - a destructive
+            // action's confirm owns the footer entirely, no scroll/nav hints mixed in.
+            theme::footer_text(&[("s", "Soft"), ("h", "Hard"), ("n/Esc", "Cancel")])
+        } else if self.is_podcast {
+            let mut hints = vec![("l/→", "Episodes"), ("/", "Search"), ("A", "Add podcast"), ("C", "Cancel subscription")];
             hints.extend(back_hint);
             hints.push(Self::FOOTER_SCROLL_DESC);
             hints.extend(Self::footer_trailer(tab_target, true));
@@ -373,6 +378,12 @@ impl App {
         }
         if self.is_search_active {
             self.render_search_overlay(item_area1, buf);
+        }
+        if matches!(self.podcast_add_stage, Some(PodcastAddStage::Input)) {
+            self.render_podcast_add_input_overlay(item_area1, buf);
+        }
+        if self.podcast_remove_confirm {
+            self.render_podcast_remove_confirm_overlay(item_area1, buf);
         }
     }
 
@@ -1163,6 +1174,178 @@ impl App {
         self.render_search_overlay(target, buf);
     }
 
+    /// The podcast-add text input (`A` on Library), drawn as an overlay the same way
+    /// render_search_overlay is - Clear first, then the TextArea's own render. Rebuilds
+    /// the block/title every frame (rather than only once at the `A` keypress) so a
+    /// Failed outcome's error message shows up immediately without a separate render
+    /// path just for that.
+    fn render_podcast_add_input_overlay(&mut self, target: Rect, buf: &mut Buffer) {
+        let title = match &self.podcast_add_error {
+            Some(err) => format!("Add podcast (name or RSS URL) - {err}"),
+            None => "Add podcast (name or RSS URL)".to_string(),
+        };
+        self.podcast_add_textarea.set_block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .border_style(Style::new().fg(crate::ui::theme::ACCENT_KEY))
+        );
+        ratatui::widgets::Clear.render(target, buf);
+        (&self.podcast_add_textarea).render(target, buf);
+    }
+
+    /// The podcast-removal confirm (`C` on Library), drawn as an overlay the same way
+    /// render_search_overlay is - ACCENT_ERROR border, matching account_removal_confirm's
+    /// own styling for the same reason (a destructive, not-undoable-from-here action).
+    fn render_podcast_remove_confirm_overlay(&self, target: Rect, buf: &mut Buffer) {
+        ratatui::widgets::Clear.render(target, buf);
+        Paragraph::new("Remove this podcast subscription?\n\n[s] Soft - unsubscribe, keep any downloaded episodes\n[h] Hard - also delete downloaded episode files\n[n] Cancel")
+            .wrap(Wrap { trim: true })
+            .block(theme::section_block("Confirm").border_style(Style::new().fg(theme::ACCENT_ERROR)))
+            .render(target, buf);
+    }
+
+    /// `AppView::PodcastAdd` rendering - Loading/Results/Confirm only; the Input stage
+    /// renders as an overlay on top of Library itself (render_podcast_add_input_overlay)
+    /// and never reaches this dispatch, since it never changes view_state away from
+    /// Library in the first place.
+    fn render_podcast_add(&mut self, area: Rect, buf: &mut Buffer) {
+        let hints: Vec<(&str, &str)> = match &self.podcast_add_stage {
+            Some(PodcastAddStage::Confirm { .. }) => vec![("←/→", "Episode count"), ("Enter", "Add"), ("Esc", "Cancel")],
+            Some(PodcastAddStage::Results(_)) => vec![("j/k", "Move"), ("l/→ Enter", "Select"), ("Esc", "Cancel")],
+            _ => vec![("Esc", "Cancel")],
+        };
+        let text_render_footer = theme::footer_text(&hints);
+        let [header_area, main_area, _player_area, _refresh_area, footer_area] = self.standard_layout(area, &text_render_footer);
+
+        App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
+        App::render_footer(footer_area, buf, &text_render_footer);
+
+        match self.podcast_add_stage.clone() {
+            Some(PodcastAddStage::Results(results)) => {
+                let [list_area, item_area1, item_area2] = Layout::vertical([Constraint::Fill(1), Constraint::Length(5), Constraint::Fill(1)]).areas(main_area);
+                let items_number = results.len();
+                let render_list_title = format!("Results [{items_number} items]");
+                let titles: Vec<String> = results.iter().map(|r| {
+                    let title = r.title.as_deref().unwrap_or("Unknown");
+                    match &r.artist_name {
+                        Some(author) if !author.is_empty() => format!("{title} — {author}"),
+                        _ => title.to_string(),
+                    }
+                }).collect();
+                self.render_list(list_area, buf, &render_list_title, &titles, &mut self.list_state_podcast_search_results.clone(), None);
+
+                if let Some(selected) = self.list_state_podcast_search_results.selected()
+                    && let Some(result) = results.get(selected) {
+                        let episode_count = result.track_count.map(|n| n.to_string()).unwrap_or_else(|| "?".to_string());
+                        Paragraph::new(format!("Author: {} - Episodes: {episode_count}", result.artist_name.as_deref().unwrap_or("Unknown")))
+                            .left_aligned()
+                            .block(theme::section_block("Info"))
+                            .render(item_area1, buf);
+
+                        self.render_podcast_result_cover_and_desc(item_area2, buf, result);
+                }
+            }
+            Some(PodcastAddStage::Confirm { chosen, episode_count }) => {
+                let [item_area1, item_area2] = Layout::vertical([Constraint::Length(5), Constraint::Fill(1)]).areas(main_area);
+                Paragraph::new(format!(
+                        "Episodes to download now: {episode_count}   (←/→ to change)\n\nPress Enter to subscribe."
+                ))
+                    .left_aligned()
+                    .block(theme::section_block("Confirm"))
+                    .render(item_area1, buf);
+                self.render_podcast_result_cover_and_desc(item_area2, buf, &chosen);
+            }
+            _ => {
+                Paragraph::new("Searching...")
+                    .centered()
+                    .block(Block::new().borders(Borders::TOP).border_style(Style::new().fg(Color::DarkGray)))
+                    .render(main_area, buf);
+            }
+        }
+    }
+
+    /// Shared by Results (currently-highlighted row) and Confirm (the chosen result) -
+    /// same cover-art rendering `render_desc_home` already does, just pointed at
+    /// `fetch_and_cache_external_cover`/a synthetic cache key (this podcast isn't a
+    /// real Audiobookshelf library item yet, so it has no item id or cover endpoint
+    /// of its own - see that function's own doc comment).
+    fn render_podcast_result_cover_and_desc(&mut self, area: Rect, buf: &mut Buffer, result: &crate::api::podcasts::search_podcast::PodcastSearchResult) {
+        let cache_key = result.id.map(|id| format!("itunes-{id}"));
+        self.load_external_cover_for_selection(result.cover.as_deref(), cache_key.as_deref());
+
+        let description = result.description_plain.as_deref().or(result.description.as_deref()).unwrap_or("No description available.");
+        let show_cover = cache_key.is_some() && self.cover_loaded_for_id == cache_key;
+
+        if show_cover {
+            let block = theme::section_block("Description");
+            let inner = block.inner(area);
+            block.render(area, buf);
+
+            let [image_area, _gap_area, text_area] = Layout::horizontal([
+                Constraint::Length(30),
+                Constraint::Length(3),
+                Constraint::Fill(1),
+            ]).areas(inner);
+
+            if let Some(cover) = &mut self.cover_protocol {
+                let image = ratatui_image::StatefulImage::default()
+                    .resize(ratatui_image::Resize::Fit(Some(ratatui_image::FilterType::Lanczos3)));
+                StatefulWidget::render(image, image_area, buf, cover);
+            }
+
+            Paragraph::new(html_to_lines(description))
+                .scroll((self.scroll_offset, 0))
+                .wrap(Wrap { trim: true })
+                .render(text_area, buf);
+        } else {
+            Paragraph::new(html_to_lines(description))
+                .scroll((self.scroll_offset, 0))
+                .wrap(Wrap { trim: true })
+                .block(theme::section_block("Description"))
+                .render(area, buf);
+        }
+    }
+
+    /// Same as `load_cover_for_selection`, but for a podcast search result's public
+    /// iTunes artwork URL rather than an Audiobookshelf item id - see
+    /// `fetch_and_cache_external_cover`'s own doc comment for why this needs a
+    /// separate fetch (no auth, arbitrary host) instead of reusing that function.
+    fn load_external_cover_for_selection(&mut self, url: Option<&str>, cache_key: Option<&str>) {
+        let (Some(url), Some(cache_key)) = (url, cache_key) else { return };
+        if self.cover_loaded_for_id.as_deref() == Some(cache_key) {
+            return;
+        }
+
+        let cache_path = cover_cache_path(cache_key);
+        let dyn_img = if cache_path.exists() {
+            std::fs::read(&cache_path).ok().and_then(|bytes| image::load_from_memory(&bytes).ok())
+        } else {
+            None
+        };
+        let protocol = dyn_img.and_then(|img| self.image_picker.as_ref().map(|picker| picker.new_resize_protocol(img)));
+
+        if protocol.is_some() {
+            self.cover_protocol = protocol;
+            self.cover_loaded_for_id = Some(cache_key.to_string());
+            return;
+        }
+
+        self.cover_protocol = None;
+        self.cover_loaded_for_id = None;
+
+        if self.image_picker.is_some() && !cache_path.exists() && !self.cover_fetch_requested.contains(cache_key) {
+            self.cover_fetch_requested.insert(cache_key.to_string());
+            let url = url.to_string();
+            let cache_key = cache_key.to_string();
+            tokio::spawn(async move {
+                if let Err(e) = fetch_and_cache_external_cover(url, cache_key.clone()).await {
+                    log::warn!("[fetch_and_cache_external_cover] {cache_key}: {e}");
+                }
+            });
+        }
+    }
+
     /// `AppView::Keymap` - the full keybind reference for whichever screen `?` was
     /// pressed from (`self.keymap_return_view`), matching CLIAMP/superfile's own
     /// dedicated help/keymap screens rather than the always-visible curated footer.
@@ -1227,6 +1410,9 @@ impl App {
                 hints.push(("h", "Back to collections (when viewing one)"));
                 if !self.is_podcast {
                     hints.push(("S", "Group by series"));
+                } else {
+                    hints.push(("A", "Add podcast subscription"));
+                    hints.push(("C", "Cancel subscription (remove)"));
                 }
                 hints.extend(globals);
                 hints.extend(Self::footer_trailer(tab_target, true));
@@ -1304,6 +1490,13 @@ impl App {
             // list itself).
             AppView::SettingsAbout => vec![],
             AppView::Keymap => vec![],
+            AppView::PodcastAdd => vec![
+                ("Enter", "Search / confirm selection (Input, Results stages)"),
+                ("j/↓ k/↑", "Move (Results stage)"),
+                ("←/→", "Change episode count preset (Confirm stage)"),
+                ("Enter", "Add subscription (Confirm stage)"),
+                ("Esc", "Cancel, back to Library (any stage)"),
+            ],
         }
     }
 
