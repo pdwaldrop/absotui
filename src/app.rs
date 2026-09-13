@@ -126,6 +126,15 @@ pub enum PodcastAddStage {
 // render path don't need to know which of the two calls actually ran.
 pub enum PodcastAddOutcome {
     Found(Vec<crate::api::podcasts::search_podcast::PodcastSearchResult>),
+    // A single Results row was picked and its real feed has been re-fetched to
+    // enrich it before landing on Confirm - see the `l`/Enter handler on
+    // PodcastAddStage::Results. iTunes' own search API never returns a podcast
+    // description at all (confirmed against its raw public API, not an
+    // Audiobookshelf or client-side gap), so Results rows always show "no
+    // description" - the podcast's actual RSS feed always has a real one, so this
+    // re-fetches it right when the user commits to a specific show, rather than
+    // for every row shown (which would mean one wasted feed fetch per result).
+    ConfirmReady(Box<crate::api::podcasts::search_podcast::PodcastSearchResult>),
     // The create_podcast -> check_new_episodes pair (spawned from the Confirm stage)
     // finished successfully - carries how many episodes check_new_episodes actually
     // reported back, which may be fewer than the chosen preset if the feed itself
@@ -1538,8 +1547,44 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                         self.view_state = AppView::Library;
                     }
                     KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
-                        if let Some(chosen) = self.list_state_podcast_search_results.selected().and_then(|i| results.get(i)) {
-                            self.podcast_add_stage = Some(PodcastAddStage::Confirm { chosen: Box::new(chosen.clone()), episode_count: 5 });
+                        if let Some(chosen) = self.list_state_podcast_search_results.selected().and_then(|i| results.get(i)).cloned() {
+                            self.podcast_add_stage = Some(PodcastAddStage::Loading);
+                            let token = self.token.clone();
+                            let server_address = self.server_address.clone();
+                            let (tx, rx) = tokio::sync::oneshot::channel();
+                            self.podcast_add_receiver = Some(rx);
+                            tokio::spawn(async move {
+                                let Some(token) = token else {
+                                    let _ = tx.send(PodcastAddOutcome::ConfirmReady(Box::new(chosen)));
+                                    return;
+                                };
+                                let Some(feed_url) = chosen.feed_url.clone() else {
+                                    let _ = tx.send(PodcastAddOutcome::ConfirmReady(Box::new(chosen)));
+                                    return;
+                                };
+                                // On failure, proceed with the search result as-is (still has
+                                // title/author/cover, just no description) rather than
+                                // blocking the whole flow over an enrichment step that failed.
+                                let enriched = match get_podcast_feed(&feed_url, &token, server_address).await {
+                                    Ok(podcast) => PodcastSearchResult {
+                                        title: podcast.metadata.title.filter(|s| !s.is_empty()).or(chosen.title.clone()),
+                                        artist_name: podcast.metadata.author.filter(|s| !s.is_empty()).or(chosen.artist_name.clone()),
+                                        description: podcast.metadata.description.filter(|s| !s.is_empty()),
+                                        description_plain: podcast.metadata.description_plain.filter(|s| !s.is_empty()),
+                                        cover: podcast.metadata.image.filter(|s| !s.is_empty()).or(chosen.cover.clone()),
+                                        track_count: if podcast.num_episodes > 0 { Some(podcast.num_episodes) } else { chosen.track_count },
+                                        genres: if podcast.metadata.categories.is_empty() { chosen.genres.clone() } else { podcast.metadata.categories },
+                                        feed_url: Some(feed_url),
+                                        id: chosen.id,
+                                        artist_id: chosen.artist_id,
+                                        release_date: chosen.release_date.clone(),
+                                        page_url: chosen.page_url.clone(),
+                                        explicit: chosen.explicit,
+                                    },
+                                    Err(_) => chosen,
+                                };
+                                let _ = tx.send(PodcastAddOutcome::ConfirmReady(Box::new(enriched)));
+                            });
                         } else {
                             self.podcast_add_stage = Some(PodcastAddStage::Results(results));
                         }
@@ -1775,7 +1820,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
             self.podcast_add_textarea.set_block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("Add podcast (name or RSS URL)")
+                    .title("Add podcast (search titles or enter RSS URL)")
                     .border_style(Style::new().fg(crate::ui::theme::ACCENT_KEY))
             );
             self.podcast_add_error = None;
@@ -2791,6 +2836,10 @@ pub fn poll_podcast_add_result(&mut self) {
                 self.list_state_podcast_search_results.select(Some(0));
                 self.podcast_add_stage = Some(PodcastAddStage::Results(results));
             }
+        }
+        Ok(PodcastAddOutcome::ConfirmReady(chosen)) => {
+            self.podcast_add_receiver = None;
+            self.podcast_add_stage = Some(PodcastAddStage::Confirm { chosen, episode_count: 5 });
         }
         Ok(PodcastAddOutcome::Created(episode_count)) => {
             self.podcast_add_receiver = None;

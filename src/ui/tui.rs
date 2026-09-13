@@ -1181,8 +1181,8 @@ impl App {
     /// path just for that.
     fn render_podcast_add_input_overlay(&mut self, target: Rect, buf: &mut Buffer) {
         let title = match &self.podcast_add_error {
-            Some(err) => format!("Add podcast (name or RSS URL) - {err}"),
-            None => "Add podcast (name or RSS URL)".to_string(),
+            Some(err) => format!("Add podcast (search titles or enter RSS URL) - {err}"),
+            None => "Add podcast (search titles or enter RSS URL)".to_string(),
         };
         self.podcast_add_textarea.set_block(
             Block::default()
@@ -1252,7 +1252,7 @@ impl App {
                         "Episodes to download now: {episode_count}   (←/→ to change)\n\nPress Enter to subscribe."
                 ))
                     .left_aligned()
-                    .block(theme::section_block("Confirm"))
+                    .block(theme::section_block("Confirm").border_style(Style::new().fg(theme::ACCENT_KEY)))
                     .render(item_area1, buf);
                 self.render_podcast_result_cover_and_desc(item_area2, buf, &chosen);
             }
@@ -1274,7 +1274,14 @@ impl App {
         let cache_key = result.id.map(|id| format!("itunes-{id}"));
         self.load_external_cover_for_selection(result.cover.as_deref(), cache_key.as_deref());
 
-        let description = result.description_plain.as_deref().or(result.description.as_deref()).unwrap_or("No description available.");
+        // iTunes' search results very often carry an empty string (not absent) for
+        // both description fields - confirmed live (e.g. "Wild Place Adventures"
+        // returned `"description":"","descriptionPlain":""`). `Option::or` only falls
+        // through on `None`, so `Some("")` would otherwise win and render as visibly
+        // nothing rather than the fallback message - filter empties out explicitly.
+        let description = result.description_plain.as_deref().filter(|s| !s.is_empty())
+            .or(result.description.as_deref().filter(|s| !s.is_empty()))
+            .unwrap_or("No description available - Audiobookshelf's search doesn't always get one back from iTunes.");
         let show_cover = cache_key.is_some() && self.cover_loaded_for_id == cache_key;
 
         if show_cover {
@@ -1621,12 +1628,15 @@ impl App {
         // the search box and the Update/Uninstall Confirm/Working/Password stages.
         // Account's own Confirm panel escalates to ACCENT_ERROR (red) once armed (see
         // render_settings_account) since l/→ there is irreversible, but the list
-        // itself stays yellow like its siblings until that point. Every other list
-        // (Home, the main Library view, Settings' own menu, SearchBook, PodcastEpisode)
-        // is just browsing/navigation, so stays ACCENT_STRUCTURE.
+        // itself stays yellow like its siblings until that point. PodcastAdd's Results
+        // stage is the same shape (l/→ advances the add-podcast flow, reached via the
+        // `A` chip on Library) - see PodcastAdd's own Confirm stage for the equivalent
+        // of Account's escalation. Every other list (Home, the main Library view,
+        // Settings' own menu, SearchBook, PodcastEpisode) is just browsing/navigation,
+        // so stays ACCENT_STRUCTURE.
         let list_accent = match self.view_state {
             AppView::SettingsLibrary | AppView::SettingsAutoplay | AppView::SettingsAccount
-                | AppView::SettingsPerItemSpeed | AppView::SettingsAutoDownload => theme::ACCENT_KEY,
+                | AppView::SettingsPerItemSpeed | AppView::SettingsAutoDownload | AppView::PodcastAdd => theme::ACCENT_KEY,
             _ => theme::ACCENT_STRUCTURE,
         };
         let block = theme::section_block(render_list_title).border_style(Style::new().fg(list_accent));
