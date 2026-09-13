@@ -1173,17 +1173,23 @@ let changelog_71 = "Changelog Absotui v0.8.5 (05/09/2026) \n\
          Enjoy!\n
          ####\n".to_string();
 let changelog_72 = format!(
-    "Changelog Absotui v{VERSION} (12/09/2026) \n\
+    "Changelog Absotui v{VERSION} (13/09/2026) \n\
          \n\
          New:\n\
          - Manage podcast subscriptions right from Library: press A to
            add a show by name or a direct RSS feed URL - browse results
-           with real cover art and description, pick how many recent
-           episodes to grab, and you're subscribed. Press C to remove
-           one, with a choice to keep or delete any downloaded episodes.
+           with real cover art, pick how many recent episodes to grab,
+           and you're subscribed. Press C to remove one, with a choice
+           to keep or delete any downloaded episodes.
          \n\
          Fixed:\n\
-         - Typing a capital R anywhere free-text (search, this new add-
+         - Podcast episode descriptions were actually showing the
+           episode's subtitle instead - real feeds often leave subtitle
+           blank or just a short duplicate of the title, which is why
+           most episodes looked like they had no description at all.
+           Fixed everywhere an episode's description shows: Home, a
+           podcast's own episode list, and that list reached via search.
+         - Typing a capital R anywhere free-text (search, the add-
            podcast box, an update/uninstall password) could trigger a
            full app reload mid-keystroke, discarding what was typed.
          - Removing or adding a podcast could leave Library showing
