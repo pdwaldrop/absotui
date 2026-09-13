@@ -228,6 +228,10 @@ pub struct App {
     pub podcast_add_textarea: ratatui_textarea::TextArea<'static>,
     pub podcast_add_receiver: Option<tokio::sync::oneshot::Receiver<PodcastAddOutcome>>,
     pub list_state_podcast_search_results: ListState,
+    // Kept alongside `podcast_add_stage` (not inside it) so `h` on the Confirm stage
+    // can hand the same list back to Results without re-searching - Confirm only
+    // carries the one chosen result, not the whole list it came from.
+    pub podcast_search_results_cache: Vec<PodcastSearchResult>,
     // Set on a Failed outcome, shown on the Input stage until the next attempt (or
     // the flow is cancelled) - cleared whenever Input is (re-)entered.
     pub podcast_add_error: Option<String>,
@@ -1114,6 +1118,7 @@ impl App {
         podcast_add_textarea: ratatui_textarea::TextArea::default(),
         podcast_add_receiver: None,
         list_state_podcast_search_results: ListState::default(),
+        podcast_search_results_cache: Vec::new(),
         podcast_add_error: None,
         podcast_remove_confirm: false,
         podcast_remove_receiver: None,
@@ -1607,6 +1612,9 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                 match key.code {
                     KeyCode::Esc => {
                         self.view_state = AppView::Library;
+                    }
+                    KeyCode::Char('h') => {
+                        self.podcast_add_stage = Some(PodcastAddStage::Results(self.podcast_search_results_cache.clone()));
                     }
                     KeyCode::Left => {
                         let episode_count = match episode_count { 5 => 3, 10 => 5, _ => 10 };
@@ -2834,6 +2842,7 @@ pub fn poll_podcast_add_result(&mut self) {
                 self.podcast_add_stage = Some(PodcastAddStage::Input);
             } else {
                 self.list_state_podcast_search_results.select(Some(0));
+                self.podcast_search_results_cache = results.clone();
                 self.podcast_add_stage = Some(PodcastAddStage::Results(results));
             }
         }

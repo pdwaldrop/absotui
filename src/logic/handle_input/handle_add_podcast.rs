@@ -38,30 +38,40 @@ pub async fn create_and_seed_podcast(chosen: PodcastSearchResult, episode_count:
         return PodcastAddOutcome::Failed("This result has no RSS feed URL".to_string());
     };
 
+    // Fetched once up front and reused for both the create payload below (iTunes
+    // search never returns a description at all, so this is the only source for a
+    // real one) and, after creation, for episode seeding - one feed fetch total
+    // instead of one at selection time plus another one here.
+    let feed = get_podcast_feed(&feed_url, &token, server_address.clone()).await.ok();
+
     let title = chosen.title.clone().unwrap_or_else(|| "Podcast".to_string());
     // Strip characters that can't live in a filesystem path, same set the official
     // web client itself strips when building a podcast's on-disk folder name.
     let clean_title: String = title.chars().filter(|c| !r#"\/:*?"<>|"#.contains(*c)).collect();
     let path = format!("{}/{}", folder.full_path, clean_title);
 
+    let feed_description = feed.as_ref().and_then(|f| {
+        f.metadata.description_plain.clone().filter(|s| !s.is_empty())
+            .or(f.metadata.description.clone().filter(|s| !s.is_empty()))
+    });
+
     let params = CreatePodcastParams {
         library_id,
         folder_id: folder.id.clone(),
         path,
         title,
-        author: chosen.artist_name.clone(),
-        description: chosen.description.clone().or(chosen.description_plain.clone()),
+        author: feed.as_ref().and_then(|f| f.metadata.author.clone()).filter(|s| !s.is_empty()).or(chosen.artist_name.clone()),
+        description: feed_description.or(chosen.description.clone()).or(chosen.description_plain.clone()),
         release_date: chosen.release_date.clone(),
         genres: chosen.genres.clone(),
         feed_url,
-        image_url: chosen.cover.clone(),
+        image_url: feed.as_ref().and_then(|f| f.metadata.image.clone()).filter(|s| !s.is_empty()).or(chosen.cover.clone()),
         itunes_page_url: chosen.page_url.clone(),
         itunes_id: chosen.id,
         itunes_artist_id: chosen.artist_id,
         explicit: chosen.explicit,
     };
 
-    let feed_url_for_seeding = params.feed_url.clone();
     let item_id = match create_podcast(params, &token, server_address.clone()).await {
         Ok(id) => id,
         Err(e) => return PodcastAddOutcome::Failed(e.to_string()),
@@ -75,12 +85,9 @@ pub async fn create_and_seed_podcast(chosen: PodcastSearchResult, episode_count:
     // whether seeding succeeds - report success with however many actually got
     // queued (possibly 0) rather than a failure, since retrying "add" from here
     // would just hit "podcast already exists" on the server.
-    let feed = match get_podcast_feed(&feed_url_for_seeding, &token, server_address.clone()).await {
-        Ok(feed) => feed,
-        Err(e) => {
-            log::warn!("[create_and_seed_podcast] created {item_id} but couldn't re-fetch feed to seed episodes: {e}");
-            return PodcastAddOutcome::Created(0);
-        }
+    let Some(feed) = feed else {
+        log::warn!("[create_and_seed_podcast] created {item_id} but couldn't fetch feed to seed episodes");
+        return PodcastAddOutcome::Created(0);
     };
 
     // Feeds conventionally list newest-first - `episodes` here is exactly what

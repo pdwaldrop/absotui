@@ -1211,7 +1211,7 @@ impl App {
     /// Library in the first place.
     fn render_podcast_add(&mut self, area: Rect, buf: &mut Buffer) {
         let hints: Vec<(&str, &str)> = match &self.podcast_add_stage {
-            Some(PodcastAddStage::Confirm { .. }) => vec![("←/→", "Episode count"), ("Enter", "Add"), ("Esc", "Cancel")],
+            Some(PodcastAddStage::Confirm { .. }) => vec![("←/→", "Episode count"), ("Enter", "Add"), ("h", "Back to results"), ("Esc", "Cancel")],
             Some(PodcastAddStage::Results(_)) => vec![("j/k", "Move"), ("l/→ Enter", "Select"), ("Esc", "Cancel")],
             _ => vec![("Esc", "Cancel")],
         };
@@ -1243,7 +1243,7 @@ impl App {
                             .block(theme::section_block("Info"))
                             .render(item_area1, buf);
 
-                        self.render_podcast_result_cover_and_desc(item_area2, buf, result);
+                        self.render_podcast_result_cover_and_desc(item_area2, buf, result, "Select this podcast (l / → / Enter) to load its full description and choose subscription settings.");
                 }
             }
             Some(PodcastAddStage::Confirm { chosen, episode_count }) => {
@@ -1254,7 +1254,7 @@ impl App {
                     .left_aligned()
                     .block(theme::section_block("Confirm").border_style(Style::new().fg(theme::ACCENT_KEY)))
                     .render(item_area1, buf);
-                self.render_podcast_result_cover_and_desc(item_area2, buf, &chosen);
+                self.render_podcast_result_cover_and_desc(item_area2, buf, &chosen, "No description available - Audiobookshelf's search doesn't always get one back from iTunes.");
             }
             _ => {
                 Paragraph::new("Searching...")
@@ -1270,7 +1270,7 @@ impl App {
     /// `fetch_and_cache_external_cover`/a synthetic cache key (this podcast isn't a
     /// real Audiobookshelf library item yet, so it has no item id or cover endpoint
     /// of its own - see that function's own doc comment).
-    fn render_podcast_result_cover_and_desc(&mut self, area: Rect, buf: &mut Buffer, result: &crate::api::podcasts::search_podcast::PodcastSearchResult) {
+    fn render_podcast_result_cover_and_desc(&mut self, area: Rect, buf: &mut Buffer, result: &crate::api::podcasts::search_podcast::PodcastSearchResult, no_description_text: &str) {
         let cache_key = result.id.map(|id| format!("itunes-{id}"));
         self.load_external_cover_for_selection(result.cover.as_deref(), cache_key.as_deref());
 
@@ -1281,7 +1281,7 @@ impl App {
         // nothing rather than the fallback message - filter empties out explicitly.
         let description = result.description_plain.as_deref().filter(|s| !s.is_empty())
             .or(result.description.as_deref().filter(|s| !s.is_empty()))
-            .unwrap_or("No description available - Audiobookshelf's search doesn't always get one back from iTunes.");
+            .unwrap_or(no_description_text);
         let show_cover = cache_key.is_some() && self.cover_loaded_for_id == cache_key;
 
         if show_cover {
@@ -1502,6 +1502,7 @@ impl App {
                 ("j/↓ k/↑", "Move (Results stage)"),
                 ("←/→", "Change episode count preset (Confirm stage)"),
                 ("Enter", "Add subscription (Confirm stage)"),
+                ("h", "Back to results (Confirm stage)"),
                 ("Esc", "Cancel, back to Library (any stage)"),
             ],
         }
