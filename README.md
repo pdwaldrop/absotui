@@ -31,11 +31,11 @@
 
 ## ✨ Features
 
-**Genuinely fast.** A minimalist Rust 🦀 TUI that opens instantly and loads quickly, even with huge libraries.
+**Genuinely fast.** A minimalist TUI, built in Rust, that opens instantly and loads quickly, even with huge libraries.
 
-- **Books & podcasts, both first-class:** a unified "New & Unfinished" podcast home, instant mark-as-finished (<kbd>F</kbd>), and autoplay straight into the next unfinished episode
+- **Books & podcasts, both first-class:** a unified "New & Unfinished" podcast home, instant mark-as-finished (<kbd>F</kbd>), and auto-play straight into the next unfinished episode
 - **Browse libraries:** flip through your Library, or jump to Collections and series — grouped, sequence-ordered, one <kbd>Tab</kbd>/<kbd>S</kbd> away
-- **See your listening habits:** a full Stats page — streaks, a day-of-week chart, a year-long activity heatmap, recent sessions, and top rankings for what and who you listen to most
+- **See your listening habits:** a full Stats page — streaks, a day-of-week chart, a year-long activity heat-map, recent sessions, and top rankings for what and who you listen to most
 - **Stream or take it offline:** download (<kbd>d</kbd>) any book or episode for offline listening, with a downloaded copy preferred automatically the moment you have one — Auto Download can keep your active listens ready without you thinking about it
 - **Real cover art, right in your terminal:** book and episode artwork rendered inline (Kitty/Ghostty/Sixel/iTerm2 terminals).
 - **Chapter-level navigation:** browse a book's full chapter list inline in Continue Listening, with live per-chapter progress
