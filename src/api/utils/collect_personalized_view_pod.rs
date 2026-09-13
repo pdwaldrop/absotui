@@ -111,23 +111,24 @@ pub async fn collect_authors_pod_cnt_list(roots: &[Root]) -> Vec<String> {
     authors_pod_cnt_list
 }
 
-/// Collect description
+/// Collect each episode's own description - `RecentEpisode.description`, not the
+/// podcast's own `Media.metadata.description` this used to read (the wrong, show-level
+/// field, and one only entities with `media`/`metadata` present even pushed a value for,
+/// producing a shorter, misaligned list next to every other per-episode field here).
+/// Mirrors `collect_subtitles_pod_cnt_list`'s guard shape exactly so this stays the same length.
 pub async fn collect_descs_pod_cnt_list(roots: &[Root]) -> Vec<String> {
     let mut descs_pod_cnt_list = Vec::new();
 
     for root in roots {
         if let Some(entities) = &root.entities {
             for entity in entities {
-                if let Some(_recent_episode) = &entity.recent_episode
-                    && let Some(media) = &entity.media
-                        && let Some(metadata) = &media.metadata {
-                            if let Some(desc) = &metadata.description {
-                                descs_pod_cnt_list.push(desc.clone());
-                            } else {
-                                descs_pod_cnt_list.push("N/A".to_string());
-                            }
-
-                        }
+                if let Some(recent_episode) = &entity.recent_episode {
+                    if let Some(desc) = &recent_episode.description {
+                        descs_pod_cnt_list.push(desc.clone());
+                    } else {
+                        descs_pod_cnt_list.push("N/A".to_string());
+                    }
+                }
             }
         }
     }

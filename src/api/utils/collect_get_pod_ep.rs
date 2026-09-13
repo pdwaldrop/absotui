@@ -113,18 +113,22 @@ pub async fn collect_authors_pod_ep(item: &Root) -> Vec<String> {
     authors_pod_ep
 }
 
-/// collect desc
+/// collect each episode's own description - `Episode.description`, not the podcast's
+/// own `Media.metadata.description` this used to read (the wrong, show-level field,
+/// and a single value rather than one per episode). Mirrors `collect_subtitles_pod_ep`'s
+/// loop shape exactly so this stays the same length as every other per-episode field.
 pub async fn collect_descs_pod_ep(item: &Root) -> Vec<String> {
     let mut descs_pod_ep = Vec::new();
 
     if let Some(media) = &item.media
-        && let Some(metadata) = &media.metadata {
-            if let Some(desc) = &metadata.description {
-                descs_pod_ep.push(desc.clone());
-            } else {
-                descs_pod_ep.push("N/A".to_string());
+        && let Some(episodes) = &media.episodes {
+            for episode in episodes {
+                if let Some(desc) = &episode.description {
+                    descs_pod_ep.push(desc.clone());
+                } else {
+                    descs_pod_ep.push("N/A".to_string());
+                }
             }
-
         }
 
     descs_pod_ep

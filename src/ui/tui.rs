@@ -1825,7 +1825,7 @@ impl App {
 
         let mut _content: String = String::new();
         if self.is_podcast {
-            _content = self.subtitles_pod_cnt_list[selected].clone();
+            _content = Self::episode_desc_or_subtitle(&self.descs_pod_cnt_list[selected], &self.subtitles_pod_cnt_list[selected]).to_string();
         } else {
             _content = self.desc_cnt_list[selected].clone();
         }
@@ -2112,7 +2112,8 @@ impl App {
             log::debug!("render_desc_pod_ep: selected={}, subtitles_pod_ep.len={}", selected, self.subtitles_pod_ep.len());
 
             if selected < self.subtitles_pod_ep.len() {
-                Paragraph::new(html_to_lines(&self.subtitles_pod_ep[selected]))
+                let content = Self::episode_desc_or_subtitle(&self.descs_pod_ep[selected], &self.subtitles_pod_ep[selected]);
+                Paragraph::new(html_to_lines(content))
                     .scroll((self.scroll_offset, 0))
                     .wrap(Wrap { trim: true })
                     .block(theme::section_block("Description"))
@@ -2129,13 +2130,22 @@ impl App {
     fn render_desc_pod_ep_search(&self, area: Rect, buf: &mut Buffer, list_state: &ListState) {
 
         if let Some(selected) = list_state.selected() {
-
-            Paragraph::new(html_to_lines(&self.subtitles_pod_ep_search[selected]))
+            let content = Self::episode_desc_or_subtitle(&self.descs_pod_ep_search[selected], &self.subtitles_pod_ep_search[selected]);
+            Paragraph::new(html_to_lines(content))
                 .scroll((self.scroll_offset, 0))
                 .wrap(Wrap { trim: true })
                 .block(theme::section_block("Description"))
                 .render(area, buf);
         }
+    }
+
+    // Real feeds often leave an episode's subtitle blank or just a short duplicate of
+    // the title, while its actual description usually carries the real summary - prefer
+    // that, falling back to subtitle only when the feed gave us nothing else. Both
+    // fields come through these collectors as literal "N/A" (not empty) when absent.
+    fn episode_desc_or_subtitle<'a>(description: &'a str, subtitle: &'a str) -> &'a str {
+        let real = |s: &'a str| (!s.is_empty() && s != "N/A").then_some(s);
+        real(description).or(real(subtitle)).unwrap_or("")
     }
 
     fn render_info_search_book(&self, area: Rect, buf: &mut Buffer, list_state: &ListState) {
