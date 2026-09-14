@@ -3,6 +3,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-CE422B?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-informational)
+[![Awesome Ratatui](https://img.shields.io/badge/Awesome-Ratatui-e43716?style=flat&logo=rust&logoColor=white)](https://github.com/ratatui/awesome-ratatui)
 
 <h1 align="center">
   <img src="linux/absotui.svg" width="75" valign="middle" alt="Absotui icon"> Absotui
