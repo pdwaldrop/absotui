@@ -1203,6 +1203,11 @@ update_absotui() {
     echo "[INFO] GitHub: $github_release"
     if [[ $local_release == $github_release ]]; then
         echo "[INFO] Up to date (version $local_release)."
+        # The desktop file/icon on the stable branch can change independently of a
+        # version bump (e.g. an icon-only touch-up), and setup_launcher is otherwise
+        # only reached from pull_latest_version below - so an already-up-to-date
+        # install would never pick up such a change. Refresh them here too.
+        setup_launcher
     else
         #echo "TODO: check if is behind or ahead?"
         if [[ "$OS" == "linux" ]]; then
