@@ -75,12 +75,20 @@ pub async fn refresh_access_token(server_address: &str, refresh_token: &str) -> 
 /// it, never untrusted input. Returns `false` (don't refresh) for anything that isn't
 /// a 3-part JWT, which is what makes this a no-op for legacy non-expiring tokens.
 fn is_token_expiring_soon(token: &str) -> bool {
-    let Some(payload_b64) = token.split('.').nth(1) else { return false; };
-    let Ok(payload_bytes) = URL_SAFE_NO_PAD.decode(payload_b64) else { return false; };
-    let Ok(claims) = serde_json::from_slice::<serde_json::Value>(&payload_bytes) else { return false; };
-    let Some(exp) = claims.get("exp").and_then(serde_json::Value::as_i64) else { return false; };
+    token_exp(token).is_some_and(|exp| exp - chrono::Utc::now().timestamp() < REFRESH_MARGIN_SECS)
+}
 
-    exp - chrono::Utc::now().timestamp() < REFRESH_MARGIN_SECS
+/// `Some(true)`/`Some(false)` for a JWT with an `exp` claim, `None` for anything else
+/// (a legacy non-expiring token) - used only to explain a rejected login.
+pub fn is_token_expired(token: &str) -> Option<bool> {
+    token_exp(token).map(|exp| exp <= chrono::Utc::now().timestamp())
+}
+
+fn token_exp(token: &str) -> Option<i64> {
+    let payload_b64 = token.split('.').nth(1)?;
+    let payload_bytes = URL_SAFE_NO_PAD.decode(payload_b64).ok()?;
+    let claims = serde_json::from_slice::<serde_json::Value>(&payload_bytes).ok()?;
+    claims.get("exp").and_then(serde_json::Value::as_i64)
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -169,6 +177,14 @@ mod tests {
     fn already_expired_token_is_flagged() {
         let exp = chrono::Utc::now().timestamp() - 60; // expired 1 minute ago
         assert!(is_token_expiring_soon(&fake_jwt_with_exp(exp)));
+    }
+
+    #[test]
+    fn is_token_expired_distinguishes_expired_valid_and_non_jwt() {
+        let now = chrono::Utc::now().timestamp();
+        assert_eq!(is_token_expired(&fake_jwt_with_exp(now - 60)), Some(true));
+        assert_eq!(is_token_expired(&fake_jwt_with_exp(now + 3600)), Some(false));
+        assert_eq!(is_token_expired("opaque-legacy-token"), None);
     }
 
     #[test]

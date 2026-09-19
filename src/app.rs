@@ -22,6 +22,7 @@ use crate::logic::handle_input::handle_l_book::handle_l_book;
 use crate::logic::handle_input::handle_l_pod::handle_l_pod;
 use crate::logic::handle_input::handle_l_pod_home::handle_l_pod_home;
 use crate::logic::handle_input::handle_add_podcast::create_and_seed_podcast;
+use crate::logic::server_recovery::{diagnose_rejected_login, LoginProblem};
 use crate::config::{ConfigFile, load_config};
 use crate::db::crud::{get_is_show_key_bindings, update_is_show_key_bindings, get_is_speed_adjusted_time, update_is_speed_adjusted_time, update_is_podcast_autoplay, delete_user, update_id_selected_lib, get_listening_session, get_is_vlc_running, update_is_per_item_speed, update_is_finished, get_is_auto_download, update_is_auto_download, update_pending_seek, update_login_err};
 use crate::api::server::refresh_token::{maybe_refresh_token, RefreshOutcome};
@@ -659,6 +660,16 @@ impl App {
                 token = decrypted_token;
                 //info!("Token successfully decrypted")
             }
+            // Without this the still-encrypted blob gets sent to the server as the
+            // bearer token, which surfaces as an unexplained HTTP 401.
+            Err(_) if !token.is_empty() => {
+                return Err(Report::new(LoginProblem(
+                    "Your saved login can't be decrypted: the secret key in the absotui config \
+                     folder's .env is missing or doesn't match the one that encrypted db.sqlite3 \
+                     (usually files copied from another install). Restore the matching .env, or \
+                     quit, delete db.sqlite3 and .env, and relaunch to log in again.".to_string(),
+                )));
+            }
             Err(e) => {
                 println!("Error: {e}");
             }
@@ -724,7 +735,14 @@ impl App {
             return Err(Report::new(std::io::Error::other("Your session expired - restart Absotui to log in again")));
         }
 
-        let all_libraries = get_all_libraries(&token, server_address.clone()).await?;
+        let had_refresh_token = !refresh_token.is_empty();
+        let all_libraries = match get_all_libraries(&token, server_address.clone()).await {
+            Ok(libraries) => libraries,
+            Err(e) if e.to_string().contains("HTTP 401") => {
+                return Err(Report::new(diagnose_rejected_login(&token, had_refresh_token, &server_address)));
+            }
+            Err(e) => return Err(e),
+        };
     let libraries_names = collect_library_names(&all_libraries).await;
     let media_types = collect_media_types(&all_libraries).await;
     let libraries_ids = collect_library_ids(&all_libraries).await;
