@@ -1,0 +1,80 @@
+name: Sync stable assets to latest release
+
+# hello_absotui.sh, config.example.toml and the linux/ desktop file + icon are served
+# live from the `stable` branch, but hello_absotui.sh verifies each of them against the
+# SHA256SUMS.txt published with the *latest release* - a manifest frozen at release time.
+# Any push to `stable` that touches one of them between releases therefore makes every
+# `absotui --update` / install / uninstall fail its checksum ("Incorrect shasum for ...")
+# until the next release is cut. This re-publishes the changed files to the latest
+# release and rewrites their lines in the manifest so the two never drift apart.
+#
+# Pushes made with GITHUB_TOKEN (cut-release's fast-forward of `stable`) don't trigger
+# workflows, which is fine: a release build generates its assets and manifest from
+# scratch anyway.
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: [stable]
+    paths:
+      - hello_absotui.sh
+      - config.example.toml
+      - linux/absotui.desktop
+      - linux/absotui.svg
+  workflow_dispatch:
+
+concurrency:
+  group: sync-stable-assets
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: stable
+
+      - name: Re-publish changed assets and their checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          tag=$(gh release view --json tagName --jq .tagName)
+          echo "Latest release: $tag"
+
+          mkdir -p dist manifest
+          cp hello_absotui.sh config.example.toml linux/absotui.desktop linux/absotui.svg dist/
+
+          # A release that's still building has no manifest yet - its own checksum job
+          # will generate one from these same files, so there's nothing to fix.
+          if ! gh release download "$tag" -p SHA256SUMS.txt --dir manifest --clobber; then
+            echo "::notice::$tag has no SHA256SUMS.txt yet (release still building?) - nothing to sync."
+            exit 0
+          fi
+
+          changed=0
+          for f in dist/*; do
+            name=$(basename "$f")
+            new=$(sha256sum "$f" | awk '{print $1}')
+            old=$(grep " ${name}\$" manifest/SHA256SUMS.txt | awk '{print $1}' || true)
+            if [ "$new" != "$old" ]; then
+              echo "$name differs from $tag's asset (${old:-none} -> $new) - re-publishing"
+              gh release upload "$tag" "$f" --clobber
+              { grep -v " ${name}\$" manifest/SHA256SUMS.txt || true; echo "$new  $name"; } | sort -k2 > manifest/next.txt
+              mv manifest/next.txt manifest/SHA256SUMS.txt
+              changed=1
+            fi
+          done
+
+          if [ "$changed" = 1 ]; then
+            gh release upload "$tag" manifest/SHA256SUMS.txt --clobber
+            echo "Updated $tag's SHA256SUMS.txt:"
+            cat manifest/SHA256SUMS.txt
+          else
+            echo "All four files already match $tag's manifest - nothing to do."
+          fi

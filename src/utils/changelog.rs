@@ -1172,8 +1172,7 @@ let changelog_71 = "Changelog Absotui v0.8.5 (05/09/2026) \n\
          \n\
          Enjoy!\n
          ####\n".to_string();
-let changelog_72 = format!(
-    "Changelog Absotui v{VERSION} (13/09/2026) \n\
+let changelog_72 = "Changelog Absotui v0.9.0 (13/09/2026) \n\
          \n\
          New:\n\
          - Manage podcast subscriptions right from Library: press A to
@@ -1197,10 +1196,28 @@ let changelog_72 = format!(
            refreshes on its own the moment the change actually finishes.
          \n\
          Enjoy!\n
+         ####\n".to_string();
+let changelog_73 = format!(
+    "Changelog Absotui v{VERSION} (19/09/2026) \n\
+         \n\
+         Fixed:\n\
+         - `absotui --update` (and the install and uninstall commands)
+           failed with \"Incorrect shasum for hello_absotui.sh\" whenever
+           the install script had been touched since the last release.
+           Those files are now re-published with their checksums
+           automatically the moment they change, so the two can't
+           drift apart again.
+         - When a saved login is rejected, Absotui now says why - it
+           can't be decrypted, it expired with no refresh token to
+           renew it, or the server revoked it - and how to log in
+           again, instead of \"Couldn't reach the server ... HTTP 401\".
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_73);
     changelog.push_str(&changelog_72);
     changelog.push_str(&changelog_71);
     changelog.push_str(&changelog_70);
