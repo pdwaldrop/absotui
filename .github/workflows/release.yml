@@ -50,7 +50,41 @@ jobs:
           cp ./linux/absotui.desktop dist/
           cp ./linux/absotui.svg dist/
           cp ./hello_absotui.sh dist/
-          
+
+      # AppImage packaging only makes sense for Linux targets, and only needs an
+      # x86_64 appimagetool regardless of which arch we're packaging - it doesn't
+      # execute the payload binary, just embeds a runtime stub for the target arch
+      # (downloaded separately for aarch64, since appimagetool only ships its own
+      # host arch's runtime). absotui only links libc/libm/libgcc_s (confirmed via
+      # ldd - reqwest here uses rustls, not system OpenSSL, and rusqlite is
+      # bundled), so no linuxdeploy-style dependency bundling is needed.
+      - name: Build AppImage
+        if: contains(matrix.target, 'linux')
+        run: |
+          arch=$(echo "${{ matrix.target }}" | cut -d- -f1)
+
+          mkdir -p AppDir/usr/bin
+          cp "target/${{ matrix.target }}/release/absotui" AppDir/usr/bin/absotui
+          cp ./linux/absotui.desktop AppDir/absotui.desktop
+          cp ./linux/absotui.svg AppDir/absotui.svg
+          ln -s usr/bin/absotui AppDir/AppRun
+
+          curl -sL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+
+          runtime_args=()
+          if [[ "$arch" != "x86_64" ]]; then
+            curl -sL -o "runtime-$arch" "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-$arch"
+            runtime_args=(--runtime-file "runtime-$arch")
+          fi
+
+          # --updateinformation lets AppImageUpdate/AppImageLauncher find new
+          # releases on their own; appimagetool bundles its own zsyncmake, so the
+          # matching .zsync file is generated automatically alongside it.
+          APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$arch" ./appimagetool "${runtime_args[@]}" \
+            --updateinformation "gh-releases-zsync|pdwaldrop|absotui|latest|absotui-$arch.AppImage.zsync" \
+            AppDir "dist/absotui-$arch.AppImage"
+
       - name: Create GitHub release and upload files
         uses: softprops/action-gh-release@v1
         with:
