@@ -93,6 +93,18 @@ In `~/.config/absotui` (Linux) or `~/Library/Preferences` (macOS) — the defaul
 In `~/.local/share/applications` (Linux):
 - `absotui.desktop` — lets you launch Absotui from a launcher app
 
+### 📦 AppImage (Linux)
+
+No install step, no root - download, make it executable, and run it:
+
+```bash
+curl -LO https://github.com/pdwaldrop/absotui/releases/latest/download/absotui-x86_64.AppImage
+chmod +x absotui-x86_64.AppImage
+./absotui-x86_64.AppImage
+```
+
+(aarch64 machines: swap in `absotui-aarch64.AppImage`.) It carries update information, so if you use AppImageUpdate or AppImageLauncher, they'll find new releases on their own. This is a separate, independent download from the install script above - either works, pick whichever fits how you manage apps.
+
 <details>
 <summary><h3>🔧 Install from source</h3></summary>
 
@@ -139,9 +151,9 @@ Files installed — same as above (`.env`, `config.toml`, `absotui.log`, `db.sql
 ---
 
 ## 🛠️ Roadmap
-Recent work: podcast subscription management (add by name or RSS URL, remove) directly from Library.
+Recent work: each Linux release now also ships as an AppImage (see Installation above).
 
-Planned: an AppImage build (each Linux release, coming next release) and an AUR package (`absotui-bin`, on hold until AUR registrations reopen).
+Planned: an AUR package (`absotui-bin`), on hold until AUR registrations reopen.
 
 See [known bugs](known_bugs.md) for what's still outstanding.
 
