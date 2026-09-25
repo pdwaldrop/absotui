@@ -1,0 +1,37 @@
+# Maintainer: Paul Waldrop <pwaldrop2@gmail.com>
+pkgname=absotui-bin
+pkgver=0.9.1
+pkgrel=1
+pkgdesc="A fun, fast, and intuitive TUI client for Audiobookshelf"
+arch=('x86_64' 'aarch64')
+url="https://github.com/pdwaldrop/absotui"
+license=('GPL-3.0-only')
+depends=('vlc' 'gnu-netcat')
+provides=('absotui')
+conflicts=('absotui')
+options=(!debug strip)
+source_x86_64=(
+    "${pkgname}-${pkgver}-x86_64.tar.gz::https://github.com/pdwaldrop/absotui/releases/download/v${pkgver}/absotui-x86_64-unknown-linux-gnu.tar.gz"
+)
+source_aarch64=(
+    "${pkgname}-${pkgver}-aarch64.tar.gz::https://github.com/pdwaldrop/absotui/releases/download/v${pkgver}/absotui-aarch64-unknown-linux-gnu.tar.gz"
+)
+source=(
+    "config.example-${pkgver}.toml::https://github.com/pdwaldrop/absotui/releases/download/v${pkgver}/config.example.toml"
+    "absotui-${pkgver}.desktop::https://github.com/pdwaldrop/absotui/releases/download/v${pkgver}/absotui.desktop"
+    "absotui-${pkgver}.svg::https://github.com/pdwaldrop/absotui/releases/download/v${pkgver}/absotui.svg"
+)
+sha256sums_x86_64=('5b850934cd69d96f1d067ff9ba70f50c819bb7160b1188e7224407748bcf78b1')
+sha256sums_aarch64=('22270d19e189e03f8c9751e4eddb1e7e335ef05e0d9dac1dfa39ebc325005387')
+sha256sums=('1d61826ad9bd26728c85f2479f93c7960daff4e1a4c896fadf5366b1936f9c85'
+            '31112a9600a4448c75a94b4f276d14140aed4269a0e72092d3303e9ff34a421f'
+            '2fee11a294408461a228d7313a64f64565b171dc2281a354b92690d756d9e509')
+
+package() {
+    cd "$srcdir"
+
+    install -Dm755 "absotui" "$pkgdir/usr/bin/absotui"
+    install -Dm644 "config.example-${pkgver}.toml" "$pkgdir/usr/share/absotui/config.example.toml"
+    install -Dm644 "absotui-${pkgver}.desktop" "$pkgdir/usr/share/applications/absotui.desktop"
+    install -Dm644 "absotui-${pkgver}.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/absotui.svg"
+}
