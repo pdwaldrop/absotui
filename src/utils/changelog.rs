@@ -1197,8 +1197,7 @@ let changelog_72 = "Changelog Absotui v0.9.0 (13/09/2026) \n\
          \n\
          Enjoy!\n
          ####\n".to_string();
-let changelog_73 = format!(
-    "Changelog Absotui v{VERSION} (19/09/2026) \n\
+let changelog_73 = "Changelog Absotui v0.9.1 (19/09/2026) \n\
          \n\
          Fixed:\n\
          - `absotui --update` (and the install and uninstall commands)
@@ -1213,10 +1212,29 @@ let changelog_73 = format!(
            again, instead of \"Couldn't reach the server ... HTTP 401\".
          \n\
          Enjoy!\n
+         ####\n".to_string();
+let changelog_74 = format!(
+    "Changelog Absotui v{VERSION} (24/09/2026) \n\
+         \n\
+         New:\n\
+         - Linux releases now also ship as a self-contained AppImage
+           (absotui-x86_64.AppImage / absotui-aarch64.AppImage) alongside
+           the existing install script - download it, make it
+           executable, and run it, no install step needed. It carries
+           update information so tools like AppImageUpdate or
+           AppImageLauncher can find new releases on their own.
+         \n\
+         Fixed:\n\
+         - Pressing up at the top of a list did nothing, while pressing
+           down at the bottom already wrapped around to the top. Up now
+           wraps to the bottom too, matching how down already worked.
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_74);
     changelog.push_str(&changelog_73);
     changelog.push_str(&changelog_72);
     changelog.push_str(&changelog_71);
