@@ -141,6 +141,8 @@ Files installed — same as above (`.env`, `config.toml`, `absotui.log`, `db.sql
 ## 🛠️ Roadmap
 Recent work: podcast subscription management (add by name or RSS URL, remove) directly from Library.
 
+Planned: an AppImage build (each Linux release, coming next release) and an AUR package (`absotui-bin`, on hold until AUR registrations reopen).
+
 See [known bugs](known_bugs.md) for what's still outstanding.
 
 ---
