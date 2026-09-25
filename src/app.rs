@@ -2749,22 +2749,87 @@ pub fn select_next(&mut self) {
 
 pub fn select_previous(&mut self) {
     match self.view_state {
-        AppView::Home => self.list_state_cnt_list.select_previous(),
-        AppView::Library => self.list_state_library.select_previous(),
-        AppView::Collections => self.list_state_collections.select_previous(),
-        AppView::SearchBook => self.list_state_search_results.select_previous(),
-        AppView::PodcastEpisode => self.list_state_pod_ep.select_previous(),
-        AppView::Settings => self.list_state_settings.select_previous(),
-        AppView::SettingsAccount => self.list_state_settings_account.select_previous(),
-        AppView::SettingsLibrary => self.list_state_settings_library.select_previous(),
+        AppView::Home => { if let Some(selected) = self.list_state_cnt_list.selected() {
+            if selected > 0 {
+                self.list_state_cnt_list.select_previous();
+            } else {
+                self.list_state_cnt_list.select(Some(self.build_home_rows().len().saturating_sub(1)));
+            }}}
+        AppView::Library => { if let Some(selected) = self.list_state_library.selected() {
+            if selected > 0 {
+                self.list_state_library.select_previous();
+            } else {
+                self.list_state_library.select(Some(self.build_library_rows().len().saturating_sub(1)));
+            }}}
+        AppView::Collections => { if let Some(selected) = self.list_state_collections.selected() {
+            if selected > 0 {
+                self.list_state_collections.select_previous();
+            } else {
+                self.list_state_collections.select(Some(self.collection_names.len().saturating_sub(1)));
+            }}}
+        AppView::SearchBook => { if let Some(selected) = self.list_state_search_results.selected() {
+            if selected > 0 {
+                self.list_state_search_results.select_previous();
+            } else {
+                self.list_state_search_results.select(Some(self.ids_search_book.len().saturating_sub(1)));
+            }}}
+        AppView::PodcastEpisode => { if let Some(selected) = self.list_state_pod_ep.selected() {
+            if selected > 0 {
+                self.list_state_pod_ep.select_previous();
+            } else {
+                let len = if self.is_from_search_pod { self.ids_pod_ep_search.len() } else { self.ids_pod_ep.len() };
+                self.list_state_pod_ep.select(Some(len.saturating_sub(1)));
+            }}}
+        AppView::Settings => { if let Some(selected) = self.list_state_settings.selected() {
+            if selected > 0 {
+                self.list_state_settings.select_previous();
+            } else {
+                self.list_state_settings.select(Some(self.settings.len().saturating_sub(1)));
+            }}}
+        AppView::SettingsAccount => { if let Some(selected) = self.list_state_settings_account.selected() {
+            if selected > 0 {
+                self.list_state_settings_account.select_previous();
+            } else {
+                self.list_state_settings_account.select(Some(self.all_usernames.len().saturating_sub(1)));
+            }}}
+        AppView::SettingsLibrary => { if let Some(selected) = self.list_state_settings_library.selected() {
+            if selected > 0 {
+                self.list_state_settings_library.select_previous();
+            } else {
+                self.list_state_settings_library.select(Some(self.media_types.len().saturating_sub(1)));
+            }}}
         AppView::SettingsAbout => self.list_state_settings_about.select_previous(),
         AppView::SettingsUpdateUninstall => self.list_state_settings_update_uninstall.select_previous(),
-        AppView::SettingsAutoplay => self.list_state_settings_autoplay.select_previous(),
-        AppView::SettingsPerItemSpeed => self.list_state_settings_per_item_speed.select_previous(),
-        AppView::SettingsAutoDownload => self.list_state_settings_auto_download.select_previous(),
+        AppView::SettingsAutoplay => { if let Some(selected) = self.list_state_settings_autoplay.selected() {
+            if selected > 0 {
+                self.list_state_settings_autoplay.select_previous();
+            } else {
+                self.list_state_settings_autoplay.select(Some(1));
+            }}}
+        AppView::SettingsPerItemSpeed => { if let Some(selected) = self.list_state_settings_per_item_speed.selected() {
+            if selected > 0 {
+                self.list_state_settings_per_item_speed.select_previous();
+            } else {
+                self.list_state_settings_per_item_speed.select(Some(1));
+            }}}
+        AppView::SettingsAutoDownload => { if let Some(selected) = self.list_state_settings_auto_download.selected() {
+            if selected > 0 {
+                self.list_state_settings_auto_download.select_previous();
+            } else {
+                self.list_state_settings_auto_download.select(Some(1));
+            }}}
         AppView::Keymap => {}
         AppView::Stats => {}
-        AppView::PodcastAdd => self.list_state_podcast_search_results.select_previous(),
+        AppView::PodcastAdd => {
+            if let Some(PodcastAddStage::Results(results)) = &self.podcast_add_stage
+                && let Some(selected) = self.list_state_podcast_search_results.selected() {
+                    if selected > 0 {
+                        self.list_state_podcast_search_results.select_previous();
+                    } else {
+                        self.list_state_podcast_search_results.select(Some(results.len().saturating_sub(1)));
+                    }
+            }
+        }
     }
 }
 
