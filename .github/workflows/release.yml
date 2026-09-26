@@ -80,10 +80,15 @@ jobs:
 
           # --updateinformation lets AppImageUpdate/AppImageLauncher find new
           # releases on their own; appimagetool bundles its own zsyncmake, so the
-          # matching .zsync file is generated automatically alongside it.
+          # matching .zsync file is generated automatically - but it lands in the
+          # working directory, not next to the AppImage, so move it into dist/
+          # for the upload step below.
           APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$arch" ./appimagetool "${runtime_args[@]}" \
             --updateinformation "gh-releases-zsync|pdwaldrop|absotui|latest|absotui-$arch.AppImage.zsync" \
             AppDir "dist/absotui-$arch.AppImage"
+          for z in ./*.AppImage.zsync; do
+            [ -e "$z" ] && mv "$z" dist/
+          done
 
       - name: Create GitHub release and upload files
         uses: softprops/action-gh-release@v1
