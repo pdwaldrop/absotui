@@ -34,6 +34,18 @@ doesn't have to rediscover it.
   about the Audiobookshelf server and real data — it does not gate normal
   absotui repo work. Commits, pushes, and merges here are ordinary workflow,
   not destructive actions.
+- 2026-09-26 (Paul, amending the "shown running" rule): a live demo is not
+  required before every commit. What's actually worked, across many sessions:
+  `cargo build`/`clippy`/`test` clean before any push, always; a real
+  live-test (tmux against a real server, an actual build/run of anything
+  shipped like a packaged binary or CI artifact, etc.) for changes with real
+  behavioral risk - UI/navigation behavior, anything touching playback, new
+  release/CI steps; routine changes (docs, changelog, config, simple fixes
+  already covered by the test suite) just need the verification above and an
+  honest description of what was and wasn't tested. Push once Paul gives an
+  explicit go-ahead in chat after seeing that description - his instruction,
+  given with knowledge of what was verified, is the authorization. Don't wait
+  on a recorded demo or Paul personally running it himself.
 
 ## Dialog
 
