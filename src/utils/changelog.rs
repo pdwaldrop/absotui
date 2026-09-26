@@ -1213,8 +1213,7 @@ let changelog_73 = "Changelog Absotui v0.9.1 (19/09/2026) \n\
          \n\
          Enjoy!\n
          ####\n".to_string();
-let changelog_74 = format!(
-    "Changelog Absotui v{VERSION} (24/09/2026) \n\
+let changelog_74 = "Changelog Absotui v0.9.2 (24/09/2026) \n\
          \n\
          New:\n\
          - Linux releases now also ship as a self-contained AppImage
@@ -1230,10 +1229,31 @@ let changelog_74 = format!(
            wraps to the bottom too, matching how down already worked.
          \n\
          Enjoy!\n
+         ####\n".to_string();
+
+
+let changelog_75 = format!(
+    "Changelog Absotui v{VERSION} (26/09/2026) \n\
+         \n\
+         Fixed:\n\
+         - Continue Listening and the podcast Home screen could show the\n\
+           wrong progress, timing, or details under the wrong title when an\n\
+           entry was missing its media or metadata. Every row now stays\n\
+           matched to its own entry.\n\
+         - Fixed a potential crash when a podcast episode list was longer\n\
+           than its cached descriptions.\n\
+         \n\
+         Changed:\n\
+         - Lists now look up each row's values directly instead of\n\
+           rebuilding and re-scanning the whole list, so large libraries\n\
+           and long episode lists render faster.\n\
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_75);
     changelog.push_str(&changelog_74);
     changelog.push_str(&changelog_73);
     changelog.push_str(&changelog_72);
