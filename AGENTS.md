@@ -30,6 +30,10 @@ doesn't have to rediscover it.
   settings. Applies to every agent, every session.
 - 2026-09-26 (Paul): Nothing is committed or pushed until the work has been
   shown running and Paul explicitly authorizes it.
+- 2026-09-26 (Paul, clarifying the above): the no-destructive-actions rule is
+  about the Audiobookshelf server and real data — it does not gate normal
+  absotui repo work. Commits, pushes, and merges here are ordinary workflow,
+  not destructive actions.
 
 ## Dialog
 
