@@ -1,8 +1,5 @@
-pub fn format_sizes(vec_bytes: Vec<i64>) -> Vec<String> {
-    vec_bytes.iter().map(|&b| format_size(b)).collect()
-}
-
-fn format_size(bytes: i64) -> String {
+/// Formats a byte count for display (e.g. `414MB`, `1.1GB`).
+pub fn format_size(bytes: i64) -> String {
     const KB: f64 = 1024.0;
     const MB: f64 = KB * 1024.0;
     const GB: f64 = MB * 1024.0;
@@ -26,21 +23,21 @@ mod tests {
 
     #[test]
     fn bytes_under_a_kb_shown_as_is() {
-        assert_eq!(format_sizes(vec![512]), vec!["512B"]);
+        assert_eq!(format_size(512), "512B");
     }
 
     #[test]
     fn megabytes_rounded_to_whole_number() {
-        assert_eq!(format_sizes(vec![434_346_364]), vec!["414MB"]);
+        assert_eq!(format_size(434_346_364), "414MB");
     }
 
     #[test]
     fn gigabytes_shown_with_one_decimal() {
-        assert_eq!(format_sizes(vec![1_181_116_006]), vec!["1.1GB"]);
+        assert_eq!(format_size(1_181_116_006), "1.1GB");
     }
 
     #[test]
     fn zero_is_zero_bytes() {
-        assert_eq!(format_sizes(vec![0]), vec!["0B"]);
+        assert_eq!(format_size(0), "0B");
     }
 }

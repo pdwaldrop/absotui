@@ -12,8 +12,8 @@ use ratatui::{
         StatefulWidget, Table, Widget, Wrap
     },
 };
-use crate::utils::convert_seconds::{convert_seconds, convert_seconds_for_prg, format_age, format_duration};
-use crate::utils::format_size::format_sizes;
+use crate::utils::convert_seconds::{convert_seconds_for_prg, format_age, format_duration};
+use crate::utils::format_size::format_size;
 use crate::db::crud::{get_listening_session, get_is_podcast_autoplay, get_is_vlc_running, get_is_per_item_speed, get_is_auto_download};
 use crate::player::integrated::player_info::{format_time, find_current_chapter};
 use crate::utils::html_to_text::html_to_lines;
@@ -974,108 +974,84 @@ impl App {
         let mut titles_search_book_or_pod: Vec<String> = Vec::new();
         let mut index_to_keep: Vec<usize> = Vec::new();
         for (index, title) in idx_and_titles {
-            titles_search_book_or_pod.push(title.clone());
+            titles_search_book_or_pod.push(title);
             index_to_keep.push(index);
         }
 
         let titles_search_book_or_pod: &[String] = &titles_search_book_or_pod;
 
-        self.ids_search_book = self.ids_library
+        // Indexed gathers, not filter+contains scans: the old shape re-scanned
+        // `index_to_keep` for every one of the library's N items in each of the 16
+        // arrays below (O(N*M) per array, every frame) just to keep the same M
+        // indices. `index_to_keep` already holds exactly the indices to keep, in
+        // order, so index straight into the source arrays. The `all_*` arrays use
+        // `.get()` rather than `[]` because they're empty until the background
+        // episode fetch lands (bug_id 3f729c) - filtering then just yields nothing,
+        // same as before.
+        self.ids_search_book = index_to_keep
             .iter()
-            .enumerate()
-            .filter(|(index, _)| index_to_keep.contains(index))
-            .map(|(_, value)| value.clone())
+            .map(|&i| self.ids_library[i].clone())
             .collect();
-        self.auth_names_pod_search_book = self.auth_names_library_pod
+        self.auth_names_pod_search_book = index_to_keep
             .iter()
-            .enumerate()
-            .filter(|(index, _)| index_to_keep.contains(index))
-            .map(|(_, value)| value.clone())
+            .map(|&i| self.auth_names_library_pod[i].clone())
             .collect();
-        self.auth_names_search_book = self.auth_names_library
+        self.auth_names_search_book = index_to_keep
             .iter()
-            .enumerate()
-            .filter(|(index, _)| index_to_keep.contains(index))
-            .map(|(_, value)| value.clone())
+            .map(|&i| self.auth_names_library[i].clone())
             .collect();
-        self.published_year_library_search_book = self.published_year_library
+        self.published_year_library_search_book = index_to_keep
             .iter()
-            .enumerate()
-            .filter(|(index, _)| index_to_keep.contains(index))
-            .map(|(_, value)| value.clone())
+            .map(|&i| self.published_year_library[i].clone())
             .collect();
-        self.desc_library_search_book = self.desc_library
+        self.desc_library_search_book = index_to_keep
             .iter()
-            .enumerate()
-            .filter(|(index, _)| index_to_keep.contains(index))
-            .map(|(_, value)| value.clone())
+            .map(|&i| self.desc_library[i].clone())
             .collect();
-        self.duration_library_search_book = self.duration_library
+        self.duration_library_search_book = index_to_keep
             .iter()
-            .enumerate()
-            .filter(|(index, _)| index_to_keep.contains(index))
-            .map(|(_, value)| *value)
+            .map(|&i| self.duration_library[i])
             .collect();
 
-        self.all_titles_pod_ep_search = self.all_titles_pod_ep
+        self.all_titles_pod_ep_search = index_to_keep
             .iter()
-            .enumerate()
-            .filter(|(index, _)| index_to_keep.contains(index))
-            .map(|(_, value)| value.clone())
+            .filter_map(|&i| self.all_titles_pod_ep.get(i).cloned())
             .collect();
-        self.all_ids_pod_ep_search = self.all_ids_pod_ep
+        self.all_ids_pod_ep_search = index_to_keep
             .iter()
-            .enumerate()
-            .filter(|(index, _)| index_to_keep.contains(index))
-            .map(|(_, value)| value.clone())
+            .filter_map(|&i| self.all_ids_pod_ep.get(i).cloned())
             .collect();
-        self.all_subtitles_pod_ep_search = self.all_subtitles_pod_ep
+        self.all_subtitles_pod_ep_search = index_to_keep
             .iter()
-            .enumerate()
-            .filter(|(index, _)| index_to_keep.contains(index))
-            .map(|(_, value)| value.clone())
+            .filter_map(|&i| self.all_subtitles_pod_ep.get(i).cloned())
             .collect();
-        self.all_seasons_pod_ep_search = self.all_seasons_pod_ep
+        self.all_seasons_pod_ep_search = index_to_keep
             .iter()
-            .enumerate()
-            .filter(|(index, _)| index_to_keep.contains(index))
-            .map(|(_, value)| value.clone())
+            .filter_map(|&i| self.all_seasons_pod_ep.get(i).cloned())
             .collect();
-        self.all_episodes_pod_ep_search = self.all_episodes_pod_ep
+        self.all_episodes_pod_ep_search = index_to_keep
             .iter()
-            .enumerate()
-            .filter(|(index, _)| index_to_keep.contains(index))
-            .map(|(_, value)| value.clone())
+            .filter_map(|&i| self.all_episodes_pod_ep.get(i).cloned())
             .collect();
-        self.all_authors_pod_ep_search = self.all_authors_pod_ep
+        self.all_authors_pod_ep_search = index_to_keep
             .iter()
-            .enumerate()
-            .filter(|(index, _)| index_to_keep.contains(index))
-            .map(|(_, value)| value.clone())
+            .filter_map(|&i| self.all_authors_pod_ep.get(i).cloned())
             .collect();
-        self.all_descs_pod_ep_search = self.all_descs_pod_ep
+        self.all_descs_pod_ep_search = index_to_keep
             .iter()
-            .enumerate()
-            .filter(|(index, _)| index_to_keep.contains(index))
-            .map(|(_, value)| value.clone())
+            .filter_map(|&i| self.all_descs_pod_ep.get(i).cloned())
             .collect();
-        self.all_titles_pod_search = self.all_titles_pod
+        self.all_titles_pod_search = index_to_keep
             .iter()
-            .enumerate()
-            .filter(|(index, _)| index_to_keep.contains(index))
-            .map(|(_, value)| value.clone())
+            .filter_map(|&i| self.all_titles_pod.get(i).cloned())
             .collect();
-        self.all_durations_pod_ep_search = self.all_durations_pod_ep
+        self.all_durations_pod_ep_search = index_to_keep
             .iter()
-            .enumerate()
-            .filter(|(index, _)| index_to_keep.contains(index))
-            .map(|(_, value)| value.clone())
+            .filter_map(|&i| self.all_durations_pod_ep.get(i).cloned())
             .collect();
-        self.ids_library_pod_search = self.ids_library
+        self.ids_library_pod_search = index_to_keep
             .iter()
-            .enumerate()
-            .filter(|(index, _)| index_to_keep.contains(index))
-            .map(|(_, value)| value.clone())
+            .map(|&i| self.ids_library[i].clone())
             .collect();
 
         App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
@@ -1765,9 +1741,6 @@ impl App {
 
 
     fn render_info_home(&self, area: Rect, buf: &mut Buffer, list_state: &ListState) {
-        let duration_cnt_list_conv = convert_seconds(self.duration_cnt_list.clone());
-        let size_cnt_list_conv = format_sizes(self.size_cnt_list.clone());
-
         // Chapter rows don't have their own info to show - resolve back to the book they
         // belong to. Cursor position no longer maps 1:1 to a book index once chapter rows
         // are spliced in, so this has to go through the same row-building the list itself
@@ -1794,11 +1767,15 @@ impl App {
                     .block(theme::section_block("Info"))
                     .render(area, buf);
                 } else {
+                    // Single values, not whole-list conversions - the old code cloned
+                    // and formatted every row's duration/size per frame just to show one.
+                    let duration = self.duration_cnt_list.get(selected).map(|&d| format_duration(d)).unwrap_or_default();
+                    let size = self.size_cnt_list.get(selected).map(|&s| format_size(s)).unwrap_or_default();
                     Paragraph::new(format!("Author: {} - Year: {} - Duration: {} - Size: {}\nProgress: {}%, {} {}",
                             self.auth_names_cnt_list[selected],
                             self.pub_year_cnt_list[selected],
-                            duration_cnt_list_conv[selected],
-                            size_cnt_list_conv[selected],
+                            duration,
+                            size,
                             self.book_progress_cnt_list[selected][0], // percentage progression
                             convert_seconds_for_prg(self.duration_cnt_list[selected], self.book_progress_cnt_list_cur_time[selected][0]), // time left
                             self.book_progress_cnt_list[selected][1], // is finished
@@ -1947,8 +1924,6 @@ impl App {
     }
 
     fn render_info_library(&self, area: Rect, buf: &mut Buffer, list_state: &ListState) {
-        let _duration_library_conv = convert_seconds(self.duration_library.clone());
-
         if let Some(selected) = list_state.selected() {
             if self.is_podcast {
                 Paragraph::new(format!("Author: {}",
@@ -2130,12 +2105,23 @@ impl App {
     fn render_desc_pod_ep_search(&self, area: Rect, buf: &mut Buffer, list_state: &ListState) {
 
         if let Some(selected) = list_state.selected() {
-            let content = Self::episode_desc_or_subtitle(&self.descs_pod_ep_search[selected], &self.subtitles_pod_ep_search[selected]);
-            Paragraph::new(html_to_lines(content))
-                .scroll((self.scroll_offset, 0))
-                .wrap(Wrap { trim: true })
-                .block(theme::section_block("Description"))
-                .render(area, buf);
+            // Same guard as render_desc_pod_ep: the search variant indexed both arrays
+            // directly, so a stale selection (cursor past the end after the arrays
+            // were rebuilt) panicked instead of showing the error panel.
+            if selected < self.descs_pod_ep_search.len() && selected < self.subtitles_pod_ep_search.len() {
+                let content = Self::episode_desc_or_subtitle(&self.descs_pod_ep_search[selected], &self.subtitles_pod_ep_search[selected]);
+                Paragraph::new(html_to_lines(content))
+                    .scroll((self.scroll_offset, 0))
+                    .wrap(Wrap { trim: true })
+                    .block(theme::section_block("Description"))
+                    .render(area, buf);
+            } else {
+                log::error!("render_desc_pod_ep_search: Index {} out of bounds (descs_len={}, subtitles_len={})!", selected, self.descs_pod_ep_search.len(), self.subtitles_pod_ep_search.len());
+                Paragraph::new("Error: Episode description unavailable.")
+                    .left_aligned()
+                    .block(theme::section_block("Description"))
+                    .render(area, buf);
+            }
         }
     }
 
@@ -2149,8 +2135,6 @@ impl App {
     }
 
     fn render_info_search_book(&self, area: Rect, buf: &mut Buffer, list_state: &ListState) {
-        let _duration_library_search_book_conv = convert_seconds(self.duration_library_search_book.clone());
-
         if let Some(selected) = list_state.selected() {
             if self.is_podcast {
                 Paragraph::new(format!("Author: {}",

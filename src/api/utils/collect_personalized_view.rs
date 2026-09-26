@@ -1,74 +1,67 @@
 use crate::api::libraries::get_library_perso_view::Root;
 
+// Every collector here pushes exactly one entry per entity - even when
+// media/metadata is missing, in which case a placeholder goes in instead. These
+// arrays are indexed in lockstep with siblings that never skip (ids, progress),
+// so skipping an entity here would silently misalign every index after it (see
+// CLAUDE.md's parallel-arrays warning) - and the pin-to-top reorder in
+// render_home indexes some of them directly, which would panic outright.
+
 /// collect titles
 pub async fn collect_titles_cnt_list(continue_listening: &[Root]) -> Vec<String> {
-    let mut titles_cnt_list = Vec::new();  
+    let mut titles_cnt_list = Vec::new();
 
     for library in continue_listening {
         if let Some(entities) = &library.entities {
             for entity in entities {
-                if let Some(media) = &entity.media  
-                    && let Some(metadata) = &media.metadata { 
-                        if let Some(title) = &metadata.title { 
-                            titles_cnt_list.push(title.clone()); 
-                        } else {
-                            titles_cnt_list.push("N/A".to_string());
-                        }
-                    }
+                let title = entity.media.as_ref()
+                    .and_then(|media| media.metadata.as_ref())
+                    .and_then(|metadata| metadata.title.clone());
+                titles_cnt_list.push(title.unwrap_or_else(|| "N/A".to_string()));
             }
         }
     }
 
-    titles_cnt_list  
+    titles_cnt_list
 }
 
-/// collect author name 
+/// collect author name - one entry per entity, see above.
 pub async fn collect_auth_names_cnt_list(continue_listening: &[Root]) -> Vec<String> {
-    let mut auth_names_cnt_list = Vec::new(); 
+    let mut auth_names_cnt_list = Vec::new();
 
     for library in continue_listening {
         if let Some(entities) = &library.entities {
             for entity in entities {
-                if let Some(media) = &entity.media  
-                    && let Some(metadata) = &media.metadata { 
-                        if let Some(author_name) = &metadata.author_name { 
-                            auth_names_cnt_list.push(author_name.clone()); 
-                        } else {
-                            auth_names_cnt_list.push("N/A".to_string());
-                        }
-
-                    }
+                let author_name = entity.media.as_ref()
+                    .and_then(|media| media.metadata.as_ref())
+                    .and_then(|metadata| metadata.author_name.clone());
+                auth_names_cnt_list.push(author_name.unwrap_or_else(|| "N/A".to_string()));
             }
         }
     }
 
-    auth_names_cnt_list  
+    auth_names_cnt_list
 }
 
-/// collect published year
+/// collect published year - one entry per entity, see above.
 pub async fn collect_pub_year_cnt_list(continue_listening: &[Root]) -> Vec<String> {
-    let mut pub_year_cnt_list = Vec::new(); 
+    let mut pub_year_cnt_list = Vec::new();
 
     for library in continue_listening {
         if let Some(entities) = &library.entities {
             for entity in entities {
-                if let Some(media) = &entity.media  
-                    && let Some(metadata) = &media.metadata { 
-                        if let Some(published_year) = &metadata.published_year { 
-                            pub_year_cnt_list.push(published_year.clone()); 
-                        } else {
-                            pub_year_cnt_list.push("N/A".to_string());
-                        }
-
-                    }
+                let published_year = entity.media.as_ref()
+                    .and_then(|media| media.metadata.as_ref())
+                    .and_then(|metadata| metadata.published_year.clone());
+                pub_year_cnt_list.push(published_year.unwrap_or_else(|| "N/A".to_string()));
             }
         }
     }
 
-    pub_year_cnt_list  
+    pub_year_cnt_list
 }
 
-/// collect duration
+/// collect duration - one entry per entity, see above.
 pub async fn collect_duration_cnt_list(continue_listening: &[Root]) -> Vec<f64> {
 
     let mut duration_cnt_list = vec![];
@@ -76,14 +69,8 @@ pub async fn collect_duration_cnt_list(continue_listening: &[Root]) -> Vec<f64> 
     for library in continue_listening {
         if let Some(entities) = &library.entities {
             for entity in entities {
-                if let Some(media) = &entity.media {  
-                    if let Some(duration) = &media.duration { 
-                        duration_cnt_list.push(*duration); 
-                    } else {
-                            duration_cnt_list.push(0.0);
-                        }
-
-                }
+                let duration = entity.media.as_ref().and_then(|media| media.duration);
+                duration_cnt_list.push(duration.unwrap_or(0.0));
             }
         }
     }
@@ -92,7 +79,7 @@ pub async fn collect_duration_cnt_list(continue_listening: &[Root]) -> Vec<f64> 
 
 }
 
-/// collect file size (bytes)
+/// collect file size (bytes) - one entry per entity, see above.
 pub async fn collect_size_cnt_list(continue_listening: &[Root]) -> Vec<i64> {
 
     let mut size_cnt_list = vec![];
@@ -100,14 +87,8 @@ pub async fn collect_size_cnt_list(continue_listening: &[Root]) -> Vec<i64> {
     for library in continue_listening {
         if let Some(entities) = &library.entities {
             for entity in entities {
-                if let Some(media) = &entity.media {
-                    if let Some(size) = &media.size {
-                        size_cnt_list.push(*size);
-                    } else {
-                            size_cnt_list.push(0);
-                        }
-
-                }
+                let size = entity.media.as_ref().and_then(|media| media.size);
+                size_cnt_list.push(size.unwrap_or(0));
             }
         }
     }
@@ -116,27 +97,22 @@ pub async fn collect_size_cnt_list(continue_listening: &[Root]) -> Vec<i64> {
 
 }
 
-/// collect description
+/// collect description - one entry per entity, see above.
 pub async fn collect_desc_cnt_list(continue_listening: &[Root]) -> Vec<String> {
-    let mut desc_cnt_list = Vec::new(); 
+    let mut desc_cnt_list = Vec::new();
 
     for library in continue_listening {
         if let Some(entities) = &library.entities {
             for entity in entities {
-                if let Some(media) = &entity.media  
-                    && let Some(metadata) = &media.metadata { 
-                        if let Some(description) = &metadata.description {
-                            desc_cnt_list.push(description.clone());
-                        } else {
-                            desc_cnt_list.push("N/A".to_string());
-                        }
-
-                    }
+                let description = entity.media.as_ref()
+                    .and_then(|media| media.metadata.as_ref())
+                    .and_then(|metadata| metadata.description.clone());
+                desc_cnt_list.push(description.unwrap_or_else(|| "N/A".to_string()));
             }
         }
     }
 
-    desc_cnt_list  
+    desc_cnt_list
 }
 
 /// collect ID of the library item

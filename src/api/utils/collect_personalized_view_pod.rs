@@ -87,23 +87,23 @@ pub async fn collect_seasons_pod_cnt_list(roots: &[Root]) -> Vec<String> {
     seasons_pod_cnt_list
 }
 
-/// Collect authors
+/// Collect authors - one entry per entity with a recent episode, matching every
+/// sibling collector here. Guarding on media/metadata too (as this used to) pushed
+/// a shorter list whenever an episode lacked them, misaligning every parallel
+/// array after it - and panicking the sort remap in fetch_podcast_home_data, which
+/// indexes by the longest array's length.
 pub async fn collect_authors_pod_cnt_list(roots: &[Root]) -> Vec<String> {
     let mut authors_pod_cnt_list = Vec::new();
 
     for root in roots {
         if let Some(entities) = &root.entities {
             for entity in entities {
-                if let Some(_recent_episode) = &entity.recent_episode
-                    && let Some(media) = &entity.media
-                        && let Some(metadata) = &media.metadata {
-                            if let Some(author) = &metadata.author {
-                                authors_pod_cnt_list.push(author.clone());
-                            } else {
-                                authors_pod_cnt_list.push("N/A".to_string());
-                            }
-
-                        }
+                if entity.recent_episode.is_some() {
+                    let author = entity.media.as_ref()
+                        .and_then(|media| media.metadata.as_ref())
+                        .and_then(|metadata| metadata.author.clone());
+                    authors_pod_cnt_list.push(author.unwrap_or_else(|| "N/A".to_string()));
+                }
             }
         }
     }
@@ -136,23 +136,20 @@ pub async fn collect_descs_pod_cnt_list(roots: &[Root]) -> Vec<String> {
     descs_pod_cnt_list
 }
 
-/// Collect podcast title
+/// Collect podcast title - one entry per entity with a recent episode, same
+/// reasoning as collect_authors_pod_cnt_list above.
 pub async fn collect_titles_pod_cnt_list(roots: &[Root]) -> Vec<String> {
     let mut titles_pod_cnt_list = Vec::new();
 
     for root in roots {
         if let Some(entities) = &root.entities {
             for entity in entities {
-                if let Some(_recent_episode) = &entity.recent_episode
-                    && let Some(media) = &entity.media
-                        && let Some(metadata) = &media.metadata {
-                            if let Some(title) = &metadata.title {
-                                titles_pod_cnt_list.push(title.clone());
-                            } else {
-                                titles_pod_cnt_list.push("N/A".to_string());
-                            }
-
-                        }
+                if entity.recent_episode.is_some() {
+                    let title = entity.media.as_ref()
+                        .and_then(|media| media.metadata.as_ref())
+                        .and_then(|metadata| metadata.title.clone());
+                    titles_pod_cnt_list.push(title.unwrap_or_else(|| "N/A".to_string()));
+                }
             }
         }
     }
@@ -160,26 +157,26 @@ pub async fn collect_titles_pod_cnt_list(roots: &[Root]) -> Vec<String> {
     titles_pod_cnt_list
 }
 
+/// One entry per entity with a recent episode, same reasoning as
+/// collect_authors_pod_cnt_list above - a missing audio_file (or duration) pushes
+/// 0.0 rather than skipping.
 pub async fn collect_durations_pod_cnt_list(roots: &[Root]) -> Vec<String> {
     let mut durations = Vec::new();
 
     for root in roots {
         if let Some(entities) = &root.entities {
             for entity in entities {
-                if let Some(recent_episode) = &entity.recent_episode
-                    && let Some(audio_file) = &recent_episode.audio_file {
-                        if let Some(duration) = audio_file.duration {
-                            durations.push(duration);
-                        } else {
-                            durations.push(0.0);
-                        }
-
-                    }
+                if let Some(recent_episode) = &entity.recent_episode {
+                    let duration = recent_episode.audio_file.as_ref()
+                        .and_then(|audio_file| audio_file.duration)
+                        .unwrap_or(0.0);
+                    durations.push(duration);
+                }
             }
         }
     }
 
-    
+
     convert_seconds(durations)
 }
 
