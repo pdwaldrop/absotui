@@ -27,7 +27,7 @@ use crate::config::{ConfigFile, load_config};
 use crate::db::crud::{get_is_show_key_bindings, update_is_show_key_bindings, get_is_speed_adjusted_time, update_is_speed_adjusted_time, update_is_podcast_autoplay, delete_user, update_id_selected_lib, get_listening_session, get_is_vlc_running, update_is_per_item_speed, update_is_finished, get_is_auto_download, update_is_auto_download, update_pending_seek, update_login_err};
 use crate::api::server::refresh_token::{maybe_refresh_token, RefreshOutcome};
 use crate::db::database_struct::Database;
-use crate::utils::convert_seconds::convert_seconds;
+use crate::utils::convert_seconds::format_duration;
 use crate::utils::download_cache::{is_downloaded, remove_download, download_book, download_episode, sync_auto_downloads, sync_auto_downloads_podcasts};
 use color_eyre::Result;
 use color_eyre::eyre::Report;
@@ -581,7 +581,7 @@ fn pin_now_playing_episode(data: &mut PodcastHomeData, username: &str) {
     data.authors.insert(0, String::new());
     data.descs.insert(0, String::new());
     data.titles_pod.insert(0, podcast_title);
-    data.durations.insert(0, convert_seconds(vec![duration]).into_iter().next().unwrap_or_default());
+    data.durations.insert(0, format_duration(duration));
     data.progress.insert(0, (session.current_time as f64, duration, 0.0));
     // Pinned regardless of natural sort position, so its published_at doesn't matter -
     // i64::MAX just documents that it was never meant to be re-sorted.
