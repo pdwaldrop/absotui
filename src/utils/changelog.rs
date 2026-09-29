@@ -1232,8 +1232,7 @@ let changelog_74 = "Changelog Absotui v0.9.2 (24/09/2026) \n\
          ####\n".to_string();
 
 
-let changelog_75 = format!(
-    "Changelog Absotui v{VERSION} (26/09/2026) \n\
+let changelog_75 = "Changelog Absotui v0.9.3 (26/09/2026) \n\
          \n\
          Fixed:\n\
          - Continue Listening and the podcast Home screen could show the\n\
@@ -1249,10 +1248,25 @@ let changelog_75 = format!(
            and long episode lists render faster.\n\
          \n\
          Enjoy!\n
+         ####\n".to_string();
+let changelog_76 = format!(
+    "Changelog Absotui v{VERSION} (29/09/2026) \n\
+         \n\
+         Fixed:\n\
+         - The Linux AppImage's update information (the .zsync file) was\n\
+           being generated but left out of the release, so tools like\n\
+           AppImageUpdate and AppImageLauncher couldn't actually find new\n\
+           versions on their own. It's included now.\n\
+         - The x86_64 AppImage required a newer glibc than many systems\n\
+           have, so it could fail to start with a \"version GLIBC_2.39\n\
+           not found\" error. Now built for broader compatibility.\n\
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_76);
     changelog.push_str(&changelog_75);
     changelog.push_str(&changelog_74);
     changelog.push_str(&changelog_73);
