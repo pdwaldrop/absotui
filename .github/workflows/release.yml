@@ -23,8 +23,14 @@ jobs:
             os: ubuntu-latest
          # - target: aarch64-apple-darwin
          #   os: macos-latest
+          # Pinned below ubuntu-latest (glibc 2.39 as of Ubuntu 24.04) so the
+          # binary doesn't require a newer glibc than most real systems have -
+          # AppImageHub's own compatibility test flagged this for real
+          # (`GLIBC_2.38'/2.39' not found) against the ubuntu-latest build.
+          # aarch64 doesn't need the same pin - it builds via `cross`'s own
+          # Docker image regardless of host OS, not directly on the runner.
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-22.04
          # - target: x86_64-apple-darwin
          #   os: macos-latest
           # Universal macOS binary is supported as universal-apple-darwin.
