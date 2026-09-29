@@ -104,3 +104,29 @@ the `.zsync` assets should appear on the release starting with the next cut.
 
 **Open questions / handoff:** none - watch the next release's assets for the
 two `.zsync` files.
+
+### 2026-09-29 — Claude Code
+
+**What changed:** AppImageHub's own discovery bot (`AppImage/appimage.github.io`
+PR #6738, not something we submitted) ran its compatibility test against our
+v0.9.3 `absotui-x86_64.AppImage` and it failed to run in their test
+environment: `GLIBC_2.38'/2.39' not found`. Root cause: the x86_64 Linux
+build runs natively on `ubuntu-latest` (Ubuntu 24.04, glibc 2.39) with no
+compatibility layer, so the binary inherited that runner's very recent glibc
+as a hard minimum - undercutting the whole "runs on basically any Linux"
+pitch for the AppImage. Pinned that matrix entry to `ubuntu-22.04` (glibc
+2.35) instead. aarch64 wasn't touched - it builds via `cross`'s own Docker
+image regardless of host OS, so its glibc baseline isn't tied to the runner
+label; the bot's report only flagged the x86_64 asset anyway.
+
+**How it was verified:** YAML syntax validated. `ubuntu-22.04`'s glibc
+version confirmed via GitHub's own `actions/runner-images` docs. The actual
+result (does the new build really need an older glibc) can't be verified
+locally - only provable on the next real release build, same situation the
+`.zsync` fix above is in.
+
+**Open questions / handoff:** watch the next release for two things: the
+`.zsync` files (per the entry above) and whether AppImageHub's bot (or a
+manual re-test) confirms the glibc requirement actually dropped. If PR #6738
+is still open then, it may be worth manually re-triggering their compat test
+or commenting with the fix status.
