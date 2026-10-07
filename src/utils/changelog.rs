@@ -1249,8 +1249,7 @@ let changelog_75 = "Changelog Absotui v0.9.3 (26/09/2026) \n\
          \n\
          Enjoy!\n
          ####\n".to_string();
-let changelog_76 = format!(
-    "Changelog Absotui v{VERSION} (29/09/2026) \n\
+let changelog_76 = "Changelog Absotui v0.9.4 (29/09/2026) \n\
          \n\
          Fixed:\n\
          - The Linux AppImage's update information (the .zsync file) was\n\
@@ -1262,10 +1261,25 @@ let changelog_76 = format!(
            not found\" error. Now built for broader compatibility.\n\
          \n\
          Enjoy!\n
+         ####\n".to_string();
+let changelog_77 = format!(
+    "Changelog Absotui v{VERSION} (06/10/2026) \n\
+         \n\
+         Fixed:\n\
+         - Logging in when Absotui's secret key (ABSOTUI_SECRET_KEY in the\n\
+           config folder's .env file) was missing or unreadable looked like\n\
+           it worked, but saved an unusable login - the next launch then\n\
+           failed with a confusing \"revoked or wrong server\" message. The\n\
+           login now stops right there and tells you what's wrong, and an\n\
+           install that's already in that state now says no login was saved\n\
+           and points at the secret key instead.\n\
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_77);
     changelog.push_str(&changelog_76);
     changelog.push_str(&changelog_75);
     changelog.push_str(&changelog_74);
