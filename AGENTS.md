@@ -244,3 +244,43 @@ previous demo showed the same kind of numbers. The recording stops scrolling
 before the "Most Listened / Top Authors" panels, which could list real
 titles. If Paul would rather not show the Stats numbers, that segment
 (about 58-71 s into the GIF) can be cut or blurred.
+
+### 2026-10-06 — Claude Code (v0.9.5 release + README accuracy)
+
+**What changed:** Cut v0.9.5 (patch). It contains the login hardening
+(`c5d860b`: a login now fails with a clear message instead of silently saving
+an empty token when `ABSOTUI_SECRET_KEY` is missing) and the new, smaller demo
+GIF (`230309d`); the in-app changelog got a v0.9.5 entry and v0.9.4's was
+frozen. Then corrected the README: (1) the Project status line claimed the API
+is "only ever used to retrieve books/podcasts and sync playback progress",
+which stopped being true in v0.9.0 - Absotui can now create podcast
+subscriptions, queue episode downloads on the server, and delete library items
+(a "hard" remove deletes the show's files on the server); the line now says so
+and notes it needs the right Audiobookshelf permissions. (2) The AppImage
+section now says VLC must be installed (the AppImage only packages the
+`absotui` binary). (3) The podcast feature bullet now mentions keeping or
+deleting downloaded files.
+
+**How it was verified:** For the release: `cargo build`/`clippy`/`test` clean
+(63 passed; only the 8 existing `too_many_arguments` warnings); the release
+workflow and binary build succeeded; all 12 assets are present including both
+AppImages and both `.zsync` files; `SHA256SUMS.txt` matches the live `stable`
+files (`hello_absotui.sh`, `config.example.toml`, `absotui.desktop`,
+`absotui.svg`) and the x86_64 tarball; the released binary reports 0.9.5 and
+contains the login fix and the new changelog text. The v0.9.4 handoff is
+closed: the x86_64 build's real glibc requirement (read from the ELF version
+table, not a text search - the v0.9.4 changelog text itself contains
+"GLIBC_2.39") is now 2.34, down from 2.39 on v0.9.3, and AppImageHub's PR
+#6738 was merged with a passing test. README claims were checked against the
+code (the list of write calls the app makes to the server) and the release
+assets. Not tested: running the AppImage on a machine without FUSE.
+
+**Open questions / handoff:** GitHub moves the `ubuntu-latest` label to
+Ubuntu 26 on October 19, 2026 - the release and checksum workflows use it
+(the x86_64 build is pinned to 22.04 and is unaffected), so watch the next
+release after that date. The README's top "Roadmap" link may not match
+GitHub's generated anchor (the heading's emoji carries an invisible
+character); couldn't verify without GitHub's page. The "Recent work" line in
+the Roadmap only mentions the AppImage - left as is. These docs commits are on
+`main` only; `stable` (what the installer fetches) stays at the v0.9.5 bump
+commit until the next release, which is fine since no installed file changed.

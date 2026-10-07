@@ -35,7 +35,7 @@
 **Genuinely fast.** A minimalist TUI, built in Rust, that opens instantly and loads quickly, even with huge libraries.
 
 - **Books & podcasts, both first-class:** a unified "New & Unfinished" podcast home, instant mark-as-finished (<kbd>F</kbd>), and auto-play straight into the next unfinished episode
-- **Manage podcast subscriptions:** add a show by name or a direct RSS URL (<kbd>A</kbd>) with real cover art and description while you browse results, or remove one (<kbd>C</kbd>) — all from Library, no separate screen
+- **Manage podcast subscriptions:** add a show by name or a direct RSS URL (<kbd>A</kbd>) with real cover art and description while you browse results, or remove one (<kbd>C</kbd>, keeping or deleting its downloaded files) — all from Library, no separate screen
 - **Browse libraries:** flip through your Library, or jump to Collections and series — grouped, sequence-ordered, one <kbd>Tab</kbd>/<kbd>S</kbd> away
 - **See your listening habits:** a full Stats page — streaks, a day-of-week chart, a year-long activity heat-map, recent sessions, and top rankings for what and who you listen to most
 - **Stream or take it offline:** download (<kbd>d</kbd>) any book or episode for offline listening, with a downloaded copy preferred automatically the moment you have one — Auto Download can keep your active listens ready without you thinking about it
@@ -50,7 +50,7 @@
 ---
 
 ## 📌 Project status
-Actively developed, single-maintainer project. Low-risk by design: the Audiobookshelf API is only ever used to retrieve books/podcasts and sync playback progress. Check [known bugs](known_bugs.md) or [open an issue](https://github.com/pdwaldrop/absotui/issues) if something looks off.
+Actively developed, single-maintainer project. Low-risk by design: Absotui reads your library and syncs playback progress. The only things it changes on your server are podcast subscriptions: <kbd>A</kbd> adds a show (and downloads the episodes you pick) and <kbd>C</kbd> removes one. A "hard" remove also deletes that show's downloaded files, and it always asks first. Both need an Audiobookshelf account with permission to do that. Check [known bugs](known_bugs.md) or [open an issue](https://github.com/pdwaldrop/absotui/issues) if something looks off.
 
 ---
 
@@ -102,6 +102,8 @@ curl -LO https://github.com/pdwaldrop/absotui/releases/latest/download/absotui-x
 chmod +x absotui-x86_64.AppImage
 ./absotui-x86_64.AppImage
 ```
+
+Playback needs VLC (`cvlc`) installed on your system - the AppImage doesn't bundle it (the install script above installs it for you).
 
 (aarch64 machines: swap in `absotui-aarch64.AppImage`.) It carries update information, so if you use AppImageUpdate or AppImageLauncher, they'll find new releases on their own. This is a separate, independent download from the install script above - either works, pick whichever fits how you manage apps.
 
