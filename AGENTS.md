@@ -130,3 +130,35 @@ locally - only provable on the next real release build, same situation the
 manual re-test) confirms the glibc requirement actually dropped. If PR #6738
 is still open then, it may be worth manually re-triggering their compat test
 or commenting with the fix status.
+
+### 2026-10-06 — Claude Code (demo GIF)
+
+**What changed:** Replaced `assets/demo.gif` with a new one made from Paul's
+screen recording of the app running against the LibriVox library (browsing,
+chapters, Stats, live playback). The README already points at
+`assets/demo.gif`, so nothing else changed. New file: 1078x680, 12 fps,
+87 s, 4.4 MB (the old one was 1126x750, 65 s, 37 MB). Edits made to the
+recording: trimmed the ~2 s blank terminal at the start, dropped two
+single-frame blank flashes (a screen clear when playback starts), and
+blurred the username and the server address in the header - the two small
+patches only, so the icons and "Connected as" stay readable. The blur is a
+heavy mosaic-then-smooth (not a light Gaussian), so the text can't be
+recovered from it. Issue #8's rule (public-domain library, username/server
+redacted) is still met.
+
+**How it was verified:** Checked every one of the 1045 GIF frames
+programmatically: the blurred patches have no readable edges (strongest edge
+11, versus ~150 for crisp text), "Connected as" and the icons are crisp in
+all frames, and there are no blank frames. Looked at a contact sheet of the
+first/last and key frames (covers, Stats, chapters, playback). Scanned the
+whole recording first for any other screen showing private info - none; the
+header is the only place the username/server appear. Committed locally with
+Paul's go-ahead; not pushed yet - waiting on his go-ahead to push.
+
+**Open questions / handoff:** The Stats page in the recording shows Paul's
+real aggregate listening totals (hours, streak, days active, book/episode
+counts) because stats come from his account, not the LibriVox library - the
+previous demo showed the same kind of numbers. The recording stops scrolling
+before the "Most Listened / Top Authors" panels, which could list real
+titles. If Paul would rather not show the Stats numbers, that segment
+(about 58-71 s into the GIF) can be cut or blurred.
