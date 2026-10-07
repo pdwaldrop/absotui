@@ -38,6 +38,16 @@ const RELOGIN_STEPS: &str = "To log in again: quit, delete db.sqlite3 (and .env)
 /// Why the server refused (HTTP 401) the token Absotui had saved, worked out from what
 /// we can see locally - the server's own 401 carries no reason.
 pub fn diagnose_rejected_login(token: &str, had_refresh_token: bool, address: &str) -> LoginProblem {
+    if token.is_empty() {
+        // No real token was ever saved - a prior login finished without one, almost
+        // always because ABSOTUI_SECRET_KEY was missing/unreadable at the time (a
+        // version before this got fixed would silently write an empty token rather
+        // than failing the login outright - see auth_process.rs).
+        return LoginProblem(format!(
+            "No login was actually saved - a previous login attempt didn't go through. \
+             Check that ABSOTUI_SECRET_KEY is set in the absotui config folder's .env file. {RELOGIN_STEPS}"
+        ));
+    }
     let why = match (crate::api::server::refresh_token::is_token_expired(token), had_refresh_token) {
         (Some(true), false) => "Your saved login has expired, and no refresh token was saved to renew it \
             (logins made before v0.5.29 can't renew themselves).".to_string(),

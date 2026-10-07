@@ -131,6 +131,88 @@ manual re-test) confirms the glibc requirement actually dropped. If PR #6738
 is still open then, it may be worth manually re-triggering their compat test
 or commenting with the fix status.
 
+### 2026-10-01 — Claude Code
+
+**What changed:** Root-caused and fixed a login bug related to Paul's Fedora
+"Couldn't reach the server... HTTP 401" report from 2026-09-19 (v0.9.1
+already made that screen explain *why* a login was rejected, but didn't stop
+the login from being savable broken in the first place) - and the same gap
+Sparky flagged in their 2026-09-26 handoff ("Without ABSOTUI_SECRET_KEY set,
+token storage fails with a confusing login error"). In `auth_process.rs`, a
+failed `encrypt_token()` call (almost always a missing/unreadable
+`ABSOTUI_SECRET_KEY`) was logged with `println!` and swallowed - the login
+proceeded anyway and wrote a user row with an *empty* token string, so the
+login screen reported success. The next launch then 401'd against that empty
+token and `diagnose_rejected_login` (from v0.9.1) reported it as "revoked /
+wrong server," which isn't what actually happened and doesn't point at the
+fix. Now: (1) `auth_process` returns `Err` immediately on either token's
+encryption failure, before anything is written to the database, so a broken
+login can no longer be silently saved; (2) `diagnose_rejected_login` special-
+cases an empty saved token with its own message naming `ABSOTUI_SECRET_KEY`
+directly, for installs already in this state from before the fix.
+
+**Files:** `src/api/server/auth_process.rs`, `src/logic/server_recovery.rs`.
+
+**How it was verified:** `cargo build`/`clippy`/`test` clean (63 passed).
+Reproduced the actual reported symptom end-to-end against a scratch copy of
+Paul's real config (`$XDG_CONFIG_HOME` override, never the real
+`~/.config/absotui`): copied `config.toml`/`.env`/`db.sqlite3`, blanked the
+saved user's `token` column directly in the copy, launched the real binary
+against his real server - confirmed the old message ("deleted or revoked...
+or belongs to a different server") was misleading for this case, then
+confirmed the new one ("No login was actually saved... check
+ABSOTUI_SECRET_KEY") after the fix. Separately confirmed `encrypt_token`
+itself genuinely errors with no secret key set, via a throwaway test
+(written, run, then reverted - not part of the diff) proving the exact
+failure this `auth_process.rs` branch now catches. Did not drive a real
+login through the TUI (no test credentials for Paul's server) - the
+login-time fix is verified by code-path reading (confirmed the early
+`return Err` sits before the only `db_insert_usr` call) plus the
+`encrypt_token`-fails repro above, not a live login attempt.
+
+**Open questions / handoff:** Committed and pushed on 2026-10-06 with
+Paul's go-ahead (see the 2026-10-06 entries below). Update: Paul's Fedora box
+turned out to be on 0.9.4 and working, so the original 401 report was never
+traced to this bug - treat this as hardening that closes Sparky's
+2026-09-26 handoff item, not as the confirmed cause of that report.
+
+### 2026-10-06 — Claude Code
+
+**What changed:** No code changes - this closes the verification gap left in
+the 2026-10-01 entry above (the login-time fix had only been checked by
+reading the code, not by driving a real login). Synced with origin first:
+nothing new upstream since v0.9.4, and the three uncommitted files from
+2026-10-01 (`auth_process.rs`, `server_recovery.rs`, this file) don't overlap
+anything.
+
+**How it was verified:** Drove the real login screen end to end, twice, against
+a throwaway fake Audiobookshelf server on `127.0.0.1` (a ~40-line Python
+script answering only `POST /login` and `GET /api/libraries`) with made-up
+test credentials, a scratch `$XDG_CONFIG_HOME` containing only `config.toml`
+(no `.env`), and `ABSOTUI_SECRET_KEY` unset. Paul's real server, real
+credentials, and real `~/.config/absotui` were not involved.
+- *Before* (the installed v0.9.4 binary, which lacks the fix): login looked
+  successful, the `users` row was saved with a **0-length token**, the next
+  request went out as `Bearer ` (empty) and got a 401, and the app showed the
+  misleading "deleted or revoked / different server" screen. The only trace
+  of the real problem was a `println!` flashing at the top of the terminal.
+- *After* (fresh build with the fix): the login screen returned to a blank
+  Server address prompt showing "ERROR: Couldn't save your login: No secret
+  found in .env. Do this: ...", the `users` table had **0 rows**, and the
+  server saw exactly one login and one libraries call.
+Fake server, tmux sessions, and scratch files were removed afterwards.
+
+**Open questions / handoff:** Committed and pushed with Paul's go-ahead
+after one more check: with `ABSOTUI_SECRET_KEY` set, a login still saves a
+real encrypted token and refresh token, and every later request carries the
+correctly decrypted token (tested against the same fake local server). The
+original Fedora report was never traced to this bug (Paul's box is on 0.9.4
+and fine). Two small leftovers, not changed: the `.env` setup instructions
+inside the error message render with odd indentation, because
+`encrypt_token.rs`'s message string contains the source file's own leading
+whitespace; and `.env` is only read once at startup, so after adding the key
+the user has to restart Absotui - the message doesn't say so.
+
 ### 2026-10-06 — Claude Code (demo GIF)
 
 **What changed:** Replaced `assets/demo.gif` with a new one made from Paul's

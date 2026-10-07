@@ -88,18 +88,23 @@ pub async fn auth_process(username: &str, password: &str, server_address: &str) 
             )));
         }
 
-        // Token encryption before insert it in the database
-        let _token_to_encrypt = effective_token;
-        let mut token_encrypted = String::new();
-        match encrypt_token(_token_to_encrypt) {
+        // Token encryption before insert it in the database. A failure here (almost
+        // always a missing/unreadable ABSOTUI_SECRET_KEY) used to be logged and
+        // swallowed, leaving `token_encrypted` as an empty string that still got
+        // written to the users table - login looked successful, but the very next
+        // launch would 401 against that empty token with no indication why. Fail the
+        // login itself instead, so nothing unusable ever reaches the database.
+        let token_encrypted = match encrypt_token(effective_token) {
             Ok(encrypted_token) => {
-                token_encrypted = encrypted_token;
                 info!("Token successfully encrypted");
+                encrypted_token
             }
             Err(e) => {
-                println!("Error: {e}");
+                return Err(Report::new(std::io::Error::other(format!(
+                    "Couldn't save your login: {e}"
+                ))));
             }
-        }
+        };
 
         // Empty when the server didn't return one (legacy `token`-only auth, or a
         // server too old for the JWT flow) - the refresh mechanism (see
@@ -110,7 +115,11 @@ pub async fn auth_process(username: &str, password: &str, server_address: &str) 
         if let Some(refresh_token) = login_response.user.refresh_token.filter(|t| !t.is_empty()) {
             match encrypt_token(&refresh_token) {
                 Ok(encrypted) => refresh_token_encrypted = encrypted,
-                Err(e) => println!("Error: {e}"),
+                Err(e) => {
+                    return Err(Report::new(std::io::Error::other(format!(
+                        "Couldn't save your login: {e}"
+                    ))));
+                }
             }
         }
 
