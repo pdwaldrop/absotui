@@ -517,3 +517,32 @@ have caught it was mine to run.
 read, so it works even with the broken file). Until then, deleting the second
 `[auth]` block from `config.toml` fixes it by hand. Paul's own `config.toml` has not
 been touched by this session.
+
+### 2026-10-20 — Claude Code (v0.11.1 release)
+
+**What changed:** Cut v0.11.1 (patch) with the fix for the install script's config
+merge writing `[auth]` twice on the second update (see the entry above). Fix and the
+v0.11.1 changelog entry were committed and pushed with Paul's go-ahead before cutting.
+
+**How it was verified:** Cut Release and Release workflows succeeded (all three
+binary builds and the checksum job); all 12 assets are on the release and every file
+matches `SHA256SUMS.txt`. The x86_64 binary and AppImage report 0.11.1, both
+binaries carry the new changelog text, glibc floor unchanged (2.34 x86_64, 2.18
+aarch64), macOS tarball is a universal binary. `main`, `stable` and the tag all sit on
+the bump commit; the four installer-fetched files served from `stable` are
+byte-identical to the release assets, and the served `hello_absotui.sh` contains the
+fixed section boundary and the duplicate-section guard. End to end with the released
+script: its config step, run on a copy of Paul's actual broken `config.toml` (which
+failed to parse with "Cannot declare ('auth',) twice"), produced a file with one
+`[auth]` that parses, and two more updates left it unchanged; a brand-new example
+config updated twice also stays clean. The `ubuntu-latest` jobs again ran on Ubuntu
+24.04.
+
+**Not verified:** a full `absotui --update` run (the real binary download and package
+steps) on any machine; macOS; the aarch64 binary and AppImage were not run.
+
+**Open questions / handoff:** Paul's own `~/.config/absotui/config.toml` still has the
+duplicate `[auth]` block as of this check (this session was blocked from editing it).
+Running `absotui --update` (handled before the config is read) should now repair it, or
+delete the second `[auth]` block by hand. Anyone else affected can do the same. Consider
+telling users who updated via the script twice since v0.10.0.
