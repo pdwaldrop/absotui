@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-    A fast, gorgeous, keyboard-driven terminal client for your self-hosted <a href="https://www.audiobookshelf.org/">Audiobookshelf</a> server.
+    A fast, keyboard-driven terminal client for your self-hosted <a href="https://www.audiobookshelf.org/">Audiobookshelf</a> server.
     Browse by library, series, or collection, and navigate chapters.
 </p>
 
@@ -32,26 +32,26 @@
 
 ## ✨ Features
 
-**Genuinely fast.** A minimalist TUI, built in Rust, that opens instantly and loads quickly, even with huge libraries.
+Absotui is a minimalist TUI built in Rust. It opens instantly and loads quickly, even with huge libraries.
 
 - **Books & podcasts, both first-class:** a unified "New & Unfinished" podcast home, instant mark-as-finished (<kbd>F</kbd>), and auto-play straight into the next unfinished episode
-- **Manage podcast subscriptions:** add a show by name or a direct RSS URL (<kbd>A</kbd>) with real cover art and description while you browse results, or remove one (<kbd>C</kbd>, keeping or deleting its downloaded files) — all from Library, no separate screen
-- **Browse libraries:** flip through your Library, or jump to Collections and series — grouped, sequence-ordered, one <kbd>Tab</kbd>/<kbd>S</kbd> away
-- **See your listening habits:** a full Stats page — streaks, a day-of-week chart, a year-long activity heat-map, recent sessions, and top rankings for what and who you listen to most
-- **Stream or take it offline:** download (<kbd>d</kbd>) any book or episode for offline listening, with a downloaded copy preferred automatically the moment you have one — Auto Download can keep your active listens ready without you thinking about it
-- **Real cover art, right in your terminal:** book and episode artwork rendered inline (Kitty/Ghostty/Sixel/iTerm2 terminals).
-- **Chapter-level navigation:** browse a book's full chapter list inline in Continue Listening, with live per-chapter progress
+- **Manage podcast subscriptions:** add a show by name or a direct RSS URL (<kbd>A</kbd>), with cover art and a description shown as you browse the results, or remove one (<kbd>C</kbd>, keeping or deleting its downloaded files). It's all done from Library, with no separate screen
+- **Browse libraries:** flip through your Library, or jump to Collections and series (grouped, in sequence order) with <kbd>Tab</kbd>/<kbd>S</kbd>
+- **Listening stats:** a Stats page with streaks, a day-of-week chart, a year-long activity heat-map, recent sessions, and top lists for what and who you listen to most
+- **Stream or listen offline:** download (<kbd>d</kbd>) any book or episode for offline listening. A downloaded copy is used automatically when you have one, and Auto Download can keep your current listens downloaded for you
+- **Cover art in your terminal:** book and episode artwork shown inline (Kitty/Ghostty/Sixel/iTerm2 terminals).
+- **Chapter navigation:** browse a book's chapter list inline in Continue Listening, with progress for each chapter
 - **Desktop integration:** a custom app icon, a taskbar/dock icon on supported terminals, and a window title showing what's playing
-- **Matches your terminal, automatically:** uses your terminal color scheme/theme
-- **In-app updates:** Settings > Update / Uninstall runs the whole install flow — live in-app
+- **Uses your terminal's colors:** follows your terminal color scheme/theme
+- **In-app updates:** Settings > Update / Uninstall runs the install flow without leaving the app
 - **Per-item playback speed:** optionally (Settings > Per-Item Speed) save a separate speed for each book or podcast instead of sharing one across everything
-- **Rock-solid sync:** keeps audiobook and podcast episode progress synced with your server
-- **SSO sign-in:** log in with a username and password, or through your server's identity provider (OpenID Connect) — see [Signing in with SSO](#-signing-in-with-sso)
+- **Progress sync:** keeps audiobook and podcast episode progress in sync with your server
+- **SSO sign-in:** log in with a username and password, or through your server's identity provider (OpenID Connect). See [Signing in with SSO](#-signing-in-with-sso)
 
 ---
 
 ## 📌 Project status
-Actively developed, single-maintainer project. Low-risk by design: Absotui reads your library and syncs playback progress. The only things it changes on your server are podcast subscriptions: <kbd>A</kbd> adds a show (and downloads the episodes you pick) and <kbd>C</kbd> removes one. A "hard" remove also deletes that show's downloaded files, and it always asks first. Both need an Audiobookshelf account with permission to do that. Check [known bugs](known_bugs.md) or [open an issue](https://github.com/pdwaldrop/absotui/issues) if something looks off.
+Actively developed, single-maintainer project. Absotui reads your library and syncs playback progress, and the only other thing it changes on your server is podcast subscriptions: <kbd>A</kbd> adds a show (and downloads the episodes you pick) and <kbd>C</kbd> removes one. A "hard" remove also deletes that show's downloaded files, and it always asks first. Both need an Audiobookshelf account with permission to do that. Check [known bugs](known_bugs.md) or [open an issue](https://github.com/pdwaldrop/absotui/issues) if something looks off.
 
 ---
 
@@ -98,7 +98,7 @@ In `~/.local/share/applications` (Linux):
 
 ### 📦 AppImage (Linux)
 
-No install step, no root - download, make it executable, and run it:
+Download it, make it executable, and run it:
 
 ```bash
 curl -LO https://github.com/pdwaldrop/absotui/releases/latest/download/absotui-x86_64.AppImage
@@ -109,7 +109,7 @@ chmod +x absotui-x86_64.AppImage
 Playback needs VLC (`cvlc`) or mpv installed on your system - the AppImage doesn't bundle either (the install script above installs the one you pick).  
 VLC is used by default. To use `mpv` instead, switch it in **Settings > Player** (or set `backend = "mpv"` under `[player]` in `config.toml`).
 
-(aarch64 machines: swap in `absotui-aarch64.AppImage`.) It carries update information, so if you use AppImageUpdate or AppImageLauncher, they'll find new releases on their own. This is a separate, independent download from the install script above - either works, pick whichever fits how you manage apps.
+On aarch64, use `absotui-aarch64.AppImage` instead. The AppImage includes update information, so AppImageUpdate and AppImageLauncher can find new releases on their own. It's separate from the install script above, so use whichever you prefer.
 
 <details>
 <summary><h3>🔧 Install from source</h3></summary>
@@ -189,10 +189,10 @@ Contributions of code, ideas, or feedback are welcome — see the [contributing 
 This project follows [this branching workflow](https://gist.github.com/digitaljhelms/4287848).
 
 ### 🎨 UI
-Absotui renders using your terminal's own color theme automatically, with a small set of accent colors pulled from it for structure (borders, active items, keybind hints) — there's no separate config to keep in sync with your terminal. The font and emoji you see may vary depending on your terminal.
+Absotui uses your terminal's own color theme, with a few accent colors taken from it for borders, active items, and keybind hints. There's no separate theme config to keep in sync. The font and emoji you see depend on your terminal.
 
 ### 🖥️ Terminal compatibility
-Absotui works in any modern terminal, but two features scale with what your terminal supports:
+Absotui works in any modern terminal, but cover art and the taskbar/dock icon depend on what your terminal supports:
 
 | Terminal | Cover art | Taskbar/dock icon & title |
 |---|:---:|:---:|
@@ -206,10 +206,10 @@ Absotui works in any modern terminal, but two features scale with what your term
 
 <sub>¹ Cover art still shows via a Unicode-block fallback instead of a real image — the terminal just doesn't speak the Kitty graphics protocol, the iTerm2 image protocol, or Sixel, which are auto-detected at startup.</sub>
 
-**Works best overall:** **Kitty**, **Ghostty**, or **WezTerm** — full-fidelity cover art and desktop integration together.
+**Works best in:** **Kitty**, **Ghostty**, or **WezTerm**, which support both cover art and the taskbar/dock icon.
 
 ### 🙏 Credits
-Absotui began as a fork of [Toutui](https://github.com/AlbanDAVID/Toutui) by [AlbanDAVID](https://github.com/AlbanDAVID), archived in December 2025 ("I'm not able to properly maintain this project anymore... please don't wait for any new releases and issue fixing."). Thanks to the original author for the foundation this project builds on. Toutui itself took its name from the French phrase "tout ouïe" ("all ears").
+Absotui began as a fork of [Toutui](https://github.com/AlbanDAVID/Toutui) by [AlbanDAVID](https://github.com/AlbanDAVID), archived in December 2025 ("I'm not able to properly maintain this project anymore... please don't wait for any new releases and issue fixing."). Thanks to the original author for getting it started. Toutui itself took its name from the French phrase "tout ouïe" ("all ears").
 
 ### 📄 License
 [GPL-3.0](LICENSE)
