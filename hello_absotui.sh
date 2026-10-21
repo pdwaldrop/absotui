@@ -574,8 +574,11 @@ install_config() {
 
             while read section; do
                 local section_uppercase=$(echo $section | tr '[:lower:]' '[:upper:]') # macOS bash3.2 doesn't support ${section^^}
-                local user_extracted_section=$(sed -En "/^(#### $section_uppercase|\[$section\])/{p;:loop n;/(^####|^\[[^($section)])/q;p;b loop;}" "$user_config")
-                local example_extracted_section=$(sed -En "/^(#### $section_uppercase|\[$section\])/{p;:loop n;/(^####|^\[[^($section)])/q;p;b loop;}" "$example_config")
+                # A section ends at the next "####" line or the next "[header]" that isn't its
+                # own. (The old `^\[[^($section)]` was a character class: e.g. [auth] after
+                # [player] didn't end it, so the next update wrote [auth] twice - a TOML error.)
+                local user_extracted_section=$(sed -En "/^(#### $section_uppercase|\[$section\])/{p;:loop n;/^####/q;/^\[$section\]/!{/^\[/q;};p;b loop;}" "$user_config")
+                local example_extracted_section=$(sed -En "/^(#### $section_uppercase|\[$section\])/{p;:loop n;/^####/q;/^\[$section\]/!{/^\[/q;};p;b loop;}" "$example_config")
                 # Now, merge user_extracted_section with example_extracted_section
                 local merged_section=
                 while read example_config_line; do
@@ -634,7 +637,16 @@ install_config() {
                 merged_config+="${merged_section}"$'\n'
             done <<< "$sections"
 	    # Enjoy Absotui's respect for their users' config files <|:^)
-            echo -e "$merged_config" > "$user_config"
+            local duplicate_sections
+            duplicate_sections=$(grep -E "^\[.+\] *$" <<< "$merged_config" | sort | uniq -d)
+            if [[ -n "$duplicate_sections" ]]; then
+                # A repeated [section] is a TOML error that stops Absotui from starting.
+                # Missing options just fall back to defaults, so leaving the file as it
+                # was is always safe.
+                echo "[WARNING] Couldn't merge new options into \"$user_config\" safely (it would repeat: $(tr '\n' ' ' <<< "$duplicate_sections")). Your config was left exactly as it was."
+            else
+                echo -e "$merged_config" > "$user_config"
+            fi
         else
             cp "$example_config" "$user_config" || (echo "[ERROR] Cannot copy \"config.toml\"."; exit $EXIT_CONFIG)
             rm -rf "$tmpdir"
