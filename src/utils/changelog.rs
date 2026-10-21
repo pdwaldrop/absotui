@@ -1320,8 +1320,7 @@ let changelog_79 = "Changelog Absotui v0.11.0 (20/10/2026) \n\
          \n\
          Enjoy!\n
          ####\n".to_string();
-let changelog_80 = format!(
-    "Changelog Absotui v{VERSION} (20/10/2026) \n\
+let changelog_80 = "Changelog Absotui v0.11.1 (20/10/2026) \n\
          \n\
          Fixed:\n\
          - Updating through the install script (absotui --update) could\n\
@@ -1334,10 +1333,28 @@ let changelog_80 = format!(
            than write one it would break.\n\
          \n\
          Enjoy!\n
+         ####\n".to_string();
+let changelog_81 = format!(
+    "Changelog Absotui v{VERSION} (21/10/2026) \n\
+         \n\
+         Fixed:\n\
+         - \"Your saved login isn't working\" (\"rejected your saved login\n\
+           even though it hasn't expired\") could appear when this\n\
+           computer's clock was off - an hour slow, say. Saved logins expire\n\
+           by the clock, so a wrong clock made a working login look dead\n\
+           until it caught up. Absotui now measures the difference from the\n\
+           server's own clock and uses it, so your login is renewed on time.\n\
+         - If the server still rejects your saved login, Absotui now renews\n\
+           it once and retries before showing an error.\n\
+         - When the clock is far off, the error screen now says so, and how\n\
+           to fix it, instead of blaming your login.\n\
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_81);
     changelog.push_str(&changelog_80);
     changelog.push_str(&changelog_79);
     changelog.push_str(&changelog_78);

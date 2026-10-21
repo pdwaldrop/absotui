@@ -546,3 +546,47 @@ duplicate `[auth]` block as of this check (this session was blocked from editing
 Running `absotui --update` (handled before the config is read) should now repair it, or
 delete the second `[auth]` block by hand. Anyone else affected can do the same. Consider
 telling users who updated via the script twice since v0.10.0.
+
+### 2026-10-21 — Claude Code (clock-skew handling for saved logins, v0.11.2)
+
+**What happened:** After Paul updated his Fedora test box, Absotui showed "Your saved
+login isn't working ... even though it hasn't expired". Diagnosed from his output: that
+box's system clock was about an hour slow (`date -u` 03:38 vs real ~04:4x; `System clock
+synchronized: no`). Absotui decides whether to refresh a token by comparing its `exp`
+with the LOCAL clock (Audiobookshelf access tokens last 1 h), so with a clock an hour slow
+a token the server had already expired still looked valid for ~55 more minutes: no
+refresh, the server answered 401, and the screen blamed the login. It clears by itself,
+which is why the same box's Sept 19 401 vanished. The startup token code was identical to
+v0.9.4, so the 0.11.x update did not cause it.
+
+**What changed:** (1) `sync_clock_with_server` (refresh_token.rs) reads the `Date` header
+of the server's public `/ping` at startup and stores the offset; every "expired / about
+to expire" check (startup, the render loop's refresh, the playback tasks') now uses the
+server's time. (2) At startup, a 401 on the first API call now triggers one forced
+refresh (`refresh_now`) and one retry before any error is shown; any other refresh
+outcome falls through to the old diagnosis (no account deletion). (3) When the offset is
+>= 2 minutes the error screen leads with "This computer's clock is about N behind/ahead
+of the server's ... Fix the clock ... then press Retry".
+
+**How it was verified:** 96 unit tests (new: expiry judged on the server's clock, offset
+from a Date header, the skew wording) plus clippy and build clean. Live against a fake
+Audiobookshelf whose clock runs 65 min ahead and whose login tokens last 30 s (a faithful
+copy of the Fedora situation; Paul's real server and config untouched - its `/ping` was
+only checked for a `Date` header): the old v0.11.1 binary reproduced the exact Fedora
+screen with a 401; the new binary on the same saved state measured +3900 s, refreshed
+once and started with zero 401s; with no clock problem but a server that rejects an
+unexpired token, the retry recovered (1 401, 1 refresh); with the clock off and the login
+genuinely dead, the screen led with the clock note and stayed bounded (2 refreshes, 2
+401s, no loop); a normal run did no refresh and logged no clock warning.
+
+**Not verified:** a real Audiobookshelf with a skewed client clock (only the fake); the
+mid-session path (the offset is a process-wide value measured at startup and on `R`, so
+the render loop and playback tasks use it, but I did not run a long playback session with
+a skewed clock); a server whose `/ping` is missing or blocked (then the offset stays 0 and
+behaviour is exactly as before); Fedora/macOS.
+
+**Open questions / handoff:** The Fedora box still has a slow clock until Paul fixes NTP
+(`sudo chronyc makestep`, then check `timedatectl`/`chronyc tracking`); the app now copes,
+but other things on that machine will keep drifting. The existing `RefreshOutcome::Failed`
+path still deletes the local account on ANY non-success refresh response (including a 5xx
+from a proxy) - separate pre-existing risk, not changed here.
