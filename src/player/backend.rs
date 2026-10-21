@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 use log::error;
@@ -18,6 +18,22 @@ pub enum Backend {
     #[default]
     Vlc,
     Mpv,
+}
+
+impl Backend {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Vlc => "vlc",
+            Self::Mpv => "mpv",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Vlc => "VLC",
+            Self::Mpv => "mpv",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -51,7 +67,11 @@ pub enum Player {
 
 impl Player {
     pub fn from_config(config: &config::Player) -> Self {
-        match config.backend {
+        Self::new(config.backend, config)
+    }
+
+    pub fn new(backend: Backend, config: &config::Player) -> Self {
+        match backend {
             Backend::Mpv => Self::Mpv { socket: mpv::socket_path() },
             Backend::Vlc => Self::Vlc(Vlc {
                 program: vlc_program(&config.cvlc),
@@ -60,6 +80,14 @@ impl Player {
                 address: config.address.clone(),
                 port: config.port.clone(),
             }),
+        }
+    }
+
+    /// Whether the player's program can be found on this machine.
+    pub fn is_installed(&self) -> bool {
+        match self {
+            Self::Vlc(vlc) => is_program_installed(&vlc.program),
+            Self::Mpv { .. } => is_program_installed("mpv"),
         }
     }
 
@@ -72,12 +100,18 @@ impl Player {
 
     // VLC's RC "shutdown" can silently fail to land, hence the pkill fallback.
     pub fn quit(&self) -> io::Result<()> {
+        let result = self.quit_gracefully();
+        if matches!(self, Self::Vlc(_)) {
+            pkill_vlc();
+        }
+        result
+    }
+
+    /// `quit` without the pkill fallback, which on macOS would also take down a VLC the
+    /// user has open on their own.
+    pub fn quit_gracefully(&self) -> io::Result<()> {
         match self {
-            Self::Vlc(vlc) => {
-                let result = quit_vlc(&vlc.address, &vlc.port);
-                pkill_vlc();
-                result
-            }
+            Self::Vlc(vlc) => quit_vlc(&vlc.address, &vlc.port),
             Self::Mpv { socket } => mpv::quit_mpv(socket),
         }
     }
@@ -131,6 +165,14 @@ impl Player {
             Self::Mpv { socket } => MpvIpc::connect(socket)?.command(mpv_command).map(drop),
         }
     }
+}
+
+fn is_program_installed(program: &str) -> bool {
+    if program.contains('/') {
+        return Path::new(program).is_file();
+    }
+    std::env::var_os("PATH")
+        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(program).is_file()))
 }
 
 // On Linux, `cvlc = "1"` selects the actual `cvlc` binary. macOS has no separate cvlc

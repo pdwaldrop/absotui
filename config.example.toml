@@ -1,6 +1,6 @@
 #### PLAYER OPTIONS ####
 [player]
-# Which player Absotui launches: "vlc" or "mpv".
+# Which player Absotui launches: "vlc" or "mpv". Also changeable in Settings > Player.
 # The cvlc, cvlc_term, address and port options below only apply to VLC.
 backend = "vlc"
 

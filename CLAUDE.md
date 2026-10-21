@@ -29,7 +29,7 @@ There is no CI test/lint workflow (`.github/workflows/` only has `release.yml`, 
 
 ### Actually exercising the app
 
-`cargo build`/`clippy`/`test` verify compilation, not behavior. This app talks to a real Audiobookshelf server and shells out to a real `vlc`/`cvlc` binary - there's no mock server or fixture data. To manually verify a change, run `cargo run` in a `tmux` session (so you can send keys and capture panes non-interactively) against a real configured server; see git log for prior sessions doing this. Requires `~/.config/absotui/config.toml` (or `~/Library/Preferences/absotui/config.toml` on macOS) to already exist with real credentials - there's no way to run the app meaningfully without one.
+`cargo build`/`clippy`/`test` verify compilation, not behavior. This app talks to a real Audiobookshelf server and shells out to a real `vlc`/`cvlc` (or `mpv`) binary - there's no mock server or fixture data. To manually verify a change, run `cargo run` in a `tmux` session (so you can send keys and capture panes non-interactively) against a real configured server; see git log for prior sessions doing this. Requires `~/.config/absotui/config.toml` (or `~/Library/Preferences/absotui/config.toml` on macOS) to already exist with real credentials - there's no way to run the app meaningfully without one.
 
 ### Cutting a release
 
@@ -66,9 +66,14 @@ Thin `reqwest` + `serde` wrappers around the Audiobookshelf API, one file per en
 
 `rusqlite` (bundled), used for durable per-user settings (one row per user, columns like `is_podcast_autoplay`, `speed_rate`) and the single current `listening_session` row - not a general data model. Every function in `crud.rs` opens its own connection and runs synchronously (blocking) even though it's called from async code; there's no `spawn_blocking` wrapping it.
 
-### `src/player/` - VLC via its RC protocol, not a library binding
+### `src/player/` - VLC or mpv behind one `Player` enum, no library binding
 
-`player/vlc/` shells out to launch `cvlc`/`vlc` with `--extraintf rc --rc-host <addr>:<port>`, then talks to it over that raw line-based TCP "remote control" protocol (`utils/vlc_tcp_stream.rs`) - not JSON, not the `vlc-rc` crate's own transport. `player/integrated/` builds higher-level playback state (position, current chapter, speed) on top of that.
+`player/backend.rs` has `Player` (`Vlc` / `Mpv`), built from `[player] backend` in `config.toml` (default VLC; `Settings > Player` rewrites that line via `config::set_backend`, and the installer sets it on a fresh install). Everything that talks to the player goes through it - `launch`/`quit`/`poll`/`toggle_pause`/`seek_*`/`set_speed`/`change_volume` - so callers never branch on the backend themselves. `Player::quit` is the full stop (VLC also gets the macOS-only `pkill VLC` fallback); `Player::quit_gracefully` skips that fallback and is the one to use anywhere that isn't mid-playback cleanup, because `pkill VLC` would also kill a VLC the user has open on their own.
+
+- **VLC** (`player/vlc/`): launches `cvlc`/`vlc` with `--extraintf rc --rc-host <addr>:<port>` and talks to it over the raw line-based TCP "remote control" protocol - not JSON, not the `vlc-rc` crate's own transport. A seek is `pause; seek N; play`.
+- **mpv** (`player/mpv.rs`): launches `mpv --no-video --keep-open=yes --input-ipc-server=<socket>` and talks JSON over a Unix socket in `$XDG_RUNTIME_DIR` (`0600`; the path must stay under 108 bytes). End of track is the `eof-reached` property, since `--keep-open` leaves the process alive.
+
+`player/session.rs` (`PlayerSession`) wraps launch, track switching and polling with readiness waits instead of fixed sleeps, and reports `Playing(position)` / `Finished` / `Closed` - the playback tasks drive that. `player/integrated/` builds higher-level playback state (position, current chapter, speed) on top of it.
 
 Playback itself is **not** driven by the main render loop: `src/logic/handle_input/handle_l_*.rs` (one per context - book, podcast episode, podcast home) is what actually starts it, spawning a detached `tokio::spawn` task that owns the whole session (launch VLC, poll it, sync progress to the Audiobookshelf server and to the sqlite `listening_session` row, handle podcast autoplay-to-next-episode, clean up on quit). That task never touches the live `App` struct directly - it communicates purely through sqlite and the log file, which is why a full `App::new()` reinit (via `R` or the periodic podcast refresh) is how the UI picks up what the playback task has been doing.
 

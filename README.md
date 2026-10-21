@@ -65,6 +65,8 @@ Actively developed, single-maintainer project. Low-risk by design: Absotui reads
 bash -c 'tmpfile=$(mktemp) && curl -LsSf https://github.com/pdwaldrop/absotui/raw/stable/hello_absotui.sh -o "$tmpfile" && bash "$tmpfile" install && rm -f "$tmpfile"'
 ```
 
+The installer asks which player to use, VLC (the default) or mpv, and installs that one. You can switch later in **Settings > Player** (the other player has to be installed). To skip the question, set `ABSOTUI_PLAYER=vlc` or `ABSOTUI_PLAYER=mpv` before running it.
+
 #### Update
 Run `absotui --update`, or quit the app and run the following in your terminal:
 
@@ -104,16 +106,15 @@ chmod +x absotui-x86_64.AppImage
 ./absotui-x86_64.AppImage
 ```
 
-Playback needs VLC (`cvlc`) or mpv installed on your system - the AppImage doesn't bundle either (the install script above installs VLC for you).  
-VLC is used by default.  
-To use `mpv` instead of VLC, set `backend = "mpv"` under `[player]` in `config.toml`.
+Playback needs VLC (`cvlc`) or mpv installed on your system - the AppImage doesn't bundle either (the install script above installs the one you pick).  
+VLC is used by default. To use `mpv` instead, switch it in **Settings > Player** (or set `backend = "mpv"` under `[player]` in `config.toml`).
 
 (aarch64 machines: swap in `absotui-aarch64.AppImage`.) It carries update information, so if you use AppImageUpdate or AppImageLauncher, they'll find new releases on their own. This is a separate, independent download from the install script above - either works, pick whichever fits how you manage apps.
 
 <details>
 <summary><h3>🔧 Install from source</h3></summary>
 
-**Requirements:** `Rust`, `VLC` (default) or `mpv` (set `backend = "mpv"` under `[player]` in `config.toml` to use mpv)
+**Requirements:** `Rust`, `VLC` (default) or `mpv` (switch in **Settings > Player**, or set `backend = "mpv"` under `[player]` in `config.toml`)
 
 <sub>Optional (VLC only): the `cvlc_term` config setting (off by default) opens a terminal to control `cvlc` directly, which additionally needs the `kitty` terminal installed.</sub>
 

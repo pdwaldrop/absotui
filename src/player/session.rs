@@ -1,6 +1,7 @@
 use std::io;
 use std::time::Duration;
-use log::{error, info};
+use std::process::Output;
+use log::{error, info, warn};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, sleep_until, Instant};
 use crate::player::backend::Player;
@@ -9,6 +10,14 @@ const POLL_INTERVAL: Duration = Duration::from_secs(1);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const REACHABILITY_CHECK_INTERVAL: Duration = Duration::from_millis(100);
+
+// The player's last words, for the log - e.g. why it quit right after starting.
+fn stderr_tail(output: &Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = stderr.trim().replace('\n', " | ");
+    let start = stderr.char_indices().rev().nth(299).map_or(0, |(i, _)| i);
+    if stderr.is_empty() { String::new() } else { format!(": {}", stderr[start..].trim_start()) }
+}
 
 pub enum TrackSource {
     Stream { server_address: String, id_session: String, track_index: i64 },
@@ -96,8 +105,10 @@ impl PlayerSession {
         let player = self.player.clone();
         let username = self.username.clone();
         let process = tokio::spawn(async move {
-            if let Err(e) = player.start(track, username).await {
-                error!("[PlayerSession] {e}");
+            match player.start(track, username).await {
+                Ok(output) if !output.status.success() => warn!("[PlayerSession] Player exited abnormally ({}){}", output.status, stderr_tail(&output)),
+                Ok(_) => {}
+                Err(e) => error!("[PlayerSession] {e}"),
             }
         });
 
@@ -128,5 +139,39 @@ impl PlayerSession {
             sleep(REACHABILITY_CHECK_INTERVAL).await;
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::ExitStatus;
+
+    fn output_with_stderr(stderr: &str) -> Output {
+        Output { status: ExitStatus::from_raw(2 << 8), stdout: Vec::new(), stderr: stderr.as_bytes().to_vec() }
+    }
+
+    #[test]
+    fn stderr_tail_is_empty_when_the_player_said_nothing() {
+        assert_eq!(stderr_tail(&output_with_stderr("  \n")), "");
+    }
+
+    #[test]
+    fn stderr_tail_keeps_a_short_message_whole() {
+        assert_eq!(stderr_tail(&output_with_stderr("could not open device\n")), ": could not open device");
+    }
+
+    #[test]
+    fn stderr_tail_puts_a_multi_line_message_on_one_line() {
+        assert_eq!(stderr_tail(&output_with_stderr("first\nsecond\n")), ": first | second");
+    }
+
+    #[test]
+    fn stderr_tail_keeps_only_the_end_of_a_long_message() {
+        let long = format!("{}END", "x".repeat(1000));
+        let tail = stderr_tail(&output_with_stderr(&long));
+        assert!(tail.ends_with("END"));
+        assert!(tail.len() <= 303, "{}", tail.len());
     }
 }

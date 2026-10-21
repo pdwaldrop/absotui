@@ -101,7 +101,7 @@ pub fn handle_key_player(key: &str, player: &Player, username: &str) -> io::Resu
         }
         // stop playback - shuts down the player itself, not the app
         "stop" => {
-            player.quit()?;
+            player.quit_gracefully()?;
         }
         _ => {}
     }

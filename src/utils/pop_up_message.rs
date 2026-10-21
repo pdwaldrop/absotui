@@ -21,11 +21,13 @@ pub fn pop_message(stdout: &mut Stdout, lines_from_bottom: u16, message: &str) -
     let (_cols, rows) = terminal::size()?;
     let target_row = rows.saturating_sub(lines_from_bottom);
 
+    // Clear first: nothing else repaints this row, so a shorter message would otherwise
+    // land on top of the tail of a longer one shown before it.
     execute!(
         stdout,
         cursor::MoveTo(0, target_row),
         SetBackgroundColor(Color::Reset),
-
+        terminal::Clear(terminal::ClearType::CurrentLine),
     )?;
 
     println!("{message}");

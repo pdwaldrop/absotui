@@ -13,6 +13,22 @@ pub fn socket_path() -> PathBuf {
     dirs::runtime_dir().unwrap_or_else(std::env::temp_dir).join("absotui-mpv.sock")
 }
 
+// A Unix socket path has to fit in sockaddr_un.sun_path (108 bytes on Linux, 104 on
+// macOS, NUL included). mpv doesn't exit when it can't bind, it just plays on with no
+// control socket - so a too-long path has to be refused before mpv is started.
+const MAX_SOCKET_PATH_BYTES: usize = if cfg!(target_os = "macos") { 103 } else { 107 };
+
+pub fn check_socket_path(socket: &Path) -> io::Result<()> {
+    let length = socket.as_os_str().len();
+    if length > MAX_SOCKET_PATH_BYTES {
+        return Err(io::Error::other(format!(
+            "mpv's control socket path is {length} bytes, over the {MAX_SOCKET_PATH_BYTES}-byte limit: {} - point XDG_RUNTIME_DIR (or TMPDIR) at a shorter directory",
+            socket.display(),
+        )));
+    }
+    Ok(())
+}
+
 pub fn mpv_command(socket: &Path, current_time: &str, source: &str, speed_rate: &str, title: &str) -> Command {
     let mut cmd = Command::new("mpv");
     // keep-open: a finished track (eof-reached) stays distinguishable from mpv being quit.
@@ -94,4 +110,29 @@ pub fn get_mpv_version() -> io::Result<String> {
         .and_then(|captures| captures.get(1))
         .map(|version| version.as_str().to_string())
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Could not extract mpv version"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_normal_runtime_dir_socket_path_is_accepted() {
+        assert!(check_socket_path(Path::new("/run/user/1000/absotui-mpv.sock")).is_ok());
+    }
+
+    #[test]
+    fn a_socket_path_over_the_limit_is_refused_with_its_length() {
+        let path = format!("/{}/absotui-mpv.sock", "d".repeat(MAX_SOCKET_PATH_BYTES));
+        let message = check_socket_path(Path::new(&path)).unwrap_err().to_string();
+        assert!(message.contains(&format!("{} bytes", path.len())), "{message}");
+        assert!(message.contains("XDG_RUNTIME_DIR"), "{message}");
+    }
+
+    #[test]
+    fn a_socket_path_exactly_at_the_limit_is_accepted() {
+        let path = format!("/{}", "d".repeat(MAX_SOCKET_PATH_BYTES - 1));
+        assert_eq!(path.len(), MAX_SOCKET_PATH_BYTES);
+        assert!(check_socket_path(Path::new(&path)).is_ok());
+    }
 }

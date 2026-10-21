@@ -12,7 +12,7 @@ use std::time::Duration;
 pub async fn sync_session_from_database(token: Option<String>, server_address: String, username: String, handle_key: &str, player: &Player) {
 
     // quit the player before close and sync session
-    let _ = player.quit();
+    let _ = player.quit_gracefully();
 
     match get_listening_session() {
         Ok(Some(session)) => {

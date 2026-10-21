@@ -1,4 +1,4 @@
-use crate::player::backend::Player;
+use crate::player::backend::{Backend, Player};
 use crate::api::utils::collect_personalized_view::{collect_titles_cnt_list, collect_auth_names_cnt_list, collect_pub_year_cnt_list, collect_duration_cnt_list, collect_size_cnt_list, collect_desc_cnt_list, collect_ids_cnt_list};
 use crate::api::utils::collect_personalized_view_pod::{collect_ids_pod_cnt_list, collect_titles_cnt_list_pod, collect_ids_ep_pod_cnt_list, collect_subtitles_pod_cnt_list, collect_nums_ep_pod_cnt_list, collect_seasons_pod_cnt_list, collect_authors_pod_cnt_list, collect_descs_pod_cnt_list, collect_titles_pod_cnt_list, collect_durations_pod_cnt_list, collect_progress_pod_cnt_list, collect_published_at_pod_cnt_list, collect_embedded_cover_ino_pod_cnt_list};
 use crate::api::utils::collect_get_all_books::{collect_titles_library, collect_ids_library, collect_auth_names_library, collect_auth_names_library_pod, collect_published_year_library, collect_desc_library, collect_duration_library, collect_series_library};
@@ -24,7 +24,7 @@ use crate::logic::handle_input::handle_l_pod::handle_l_pod;
 use crate::logic::handle_input::handle_l_pod_home::handle_l_pod_home;
 use crate::logic::handle_input::handle_add_podcast::create_and_seed_podcast;
 use crate::logic::server_recovery::{diagnose_rejected_login, LoginProblem};
-use crate::config::{ConfigFile, load_config};
+use crate::config::{ConfigFile, load_config, set_backend};
 use crate::db::crud::{get_is_show_key_bindings, update_is_show_key_bindings, get_is_speed_adjusted_time, update_is_speed_adjusted_time, update_is_podcast_autoplay, delete_user, update_id_selected_lib, get_listening_session, get_is_vlc_running, update_is_per_item_speed, update_is_finished, get_is_auto_download, update_is_auto_download, update_pending_seek, update_login_err};
 use crate::api::server::refresh_token::{maybe_refresh_token, RefreshOutcome};
 use crate::db::database_struct::Database;
@@ -84,6 +84,7 @@ pub enum AppView {
     SettingsAutoplay,
     SettingsPerItemSpeed,
     SettingsAutoDownload,
+    SettingsPlayer,
     // Full keybind reference for whichever screen it was opened from (see
     // `keymap_return_view`) - bound to `?`, matching CLIAMP/superfile's own
     // dedicated help/keymap screens.
@@ -198,6 +199,7 @@ pub struct App {
     pub list_state_settings_autoplay: ListState,
     pub list_state_settings_per_item_speed: ListState,
     pub list_state_settings_auto_download: ListState,
+    pub list_state_settings_player: ListState,
     pub _titles_cnt_list: Vec<String>,
     pub auth_names_cnt_list: Vec<String>,
     pub pub_year_cnt_list: Vec<String>,
@@ -621,14 +623,16 @@ pub(crate) const SETTINGS_LIBRARY: &str = "Library";
 pub(crate) const SETTINGS_PER_ITEM_SPEED: &str = "Per-Item Speed";
 pub(crate) const SETTINGS_PODCAST_AUTOPLAY: &str = "Podcast Autoplay";
 pub(crate) const SETTINGS_AUTO_DOWNLOAD: &str = "Auto Download";
+pub(crate) const SETTINGS_PLAYER: &str = "Player";
 pub(crate) const SETTINGS_UPDATE_UNINSTALL: &str = "Update/Uninstall";
 pub(crate) const SETTINGS_ABOUT: &str = "About";
 pub(crate) const SETTINGS_ACCOUNT: &str = "Account";
-const SETTINGS_ENTRIES: [&str; 7] = [
+const SETTINGS_ENTRIES: [&str; 8] = [
     SETTINGS_LIBRARY,
     SETTINGS_PER_ITEM_SPEED,
     SETTINGS_PODCAST_AUTOPLAY,
     SETTINGS_AUTO_DOWNLOAD,
+    SETTINGS_PLAYER,
     SETTINGS_UPDATE_UNINSTALL,
     SETTINGS_ABOUT,
     SETTINGS_ACCOUNT,
@@ -641,6 +645,35 @@ impl App {
     /// of a raw position. See `SETTINGS_ENTRIES`'s doc comment for why.
     pub(crate) fn settings_index(&self, name: &str) -> Option<usize> {
         self.settings.iter().position(|s| s == name)
+    }
+
+    /// Settings > Player: saves the choice to config.toml and switches `self.player` to
+    /// it. Refused while something is playing (the running session belongs to the other
+    /// player) or when the chosen program isn't installed.
+    fn apply_player_backend(&mut self, backend: Backend) {
+        let mut stdout = stdout();
+        if get_is_vlc_running(&self.username) == "1" {
+            let _ = pop_message(&mut stdout, 3, "Stop playback first, then change the player");
+            return;
+        }
+        if backend == self.config.player.backend {
+            return;
+        }
+        let player = Player::new(backend, &self.config.player);
+        if !player.is_installed() {
+            let _ = pop_message(&mut stdout, 3, &format!("{} isn't installed - install it first, then try again", backend.label()));
+            return;
+        }
+        match set_backend(backend) {
+            Ok(()) => {
+                self.config.player.backend = backend;
+                self.player = player;
+            }
+            Err(e) => {
+                error!("[apply_player_backend] {e}");
+                let _ = pop_message(&mut stdout, 3, &format!("Couldn't save the player choice: {e}"));
+            }
+        }
     }
 
     pub async fn new() -> Result<Self> {
@@ -1074,6 +1107,8 @@ impl App {
     list_state_settings_per_item_speed.select(Some(0));
     let mut list_state_settings_auto_download = ListState::default();
     list_state_settings_auto_download.select(Some(0));
+    let mut list_state_settings_player = ListState::default();
+    list_state_settings_player.select(Some(0));
 
     Ok(Self {
         database,
@@ -1094,6 +1129,7 @@ impl App {
         list_state_settings_autoplay,
         list_state_settings_per_item_speed,
         list_state_settings_auto_download,
+        list_state_settings_player,
         _titles_cnt_list,
         auth_names_cnt_list,
         pub_year_cnt_list,
@@ -2040,6 +2076,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                 AppView::SettingsAutoplay => {self.view_state = AppView::Settings}
                 AppView::SettingsPerItemSpeed => {self.view_state = AppView::Settings}
                 AppView::SettingsAutoDownload => {self.view_state = AppView::Settings}
+                AppView::SettingsPlayer => {self.view_state = AppView::Settings}
                 AppView::Settings => {self.view_state = AppView::Home}
                 AppView::PodcastEpisode => {
                     if self.is_from_search_pod {
@@ -2223,6 +2260,12 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                         self.view_state = AppView::SettingsUpdateUninstall;
                     } else if selected == self.settings_index(SETTINGS_AUTO_DOWNLOAD) {
                         self.view_state = AppView::SettingsAutoDownload;
+                    } else if selected == self.settings_index(SETTINGS_PLAYER) {
+                        self.list_state_settings_player.select(Some(match self.config.player.backend {
+                            Backend::Vlc => 0,
+                            Backend::Mpv => 1,
+                        }));
+                        self.view_state = AppView::SettingsPlayer;
                     }
                 }
                 AppView::SettingsUpdateUninstall => {
@@ -2255,6 +2298,11 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                     if let Some(index) = self.list_state_settings_auto_download.selected() {
                         let value = if index == 0 { "1" } else { "0" };
                         let _ = update_is_auto_download(value, &self.username);
+                    }
+                }
+                AppView::SettingsPlayer => {
+                    if let Some(index) = self.list_state_settings_player.selected() {
+                        self.apply_player_backend(if index == 0 { Backend::Vlc } else { Backend::Mpv });
                     }
                 }
                 AppView::SettingsLibrary => {
@@ -2475,6 +2523,7 @@ fn toggle_view(&mut self) {
         AppView::SettingsAutoplay => AppView::Home,
         AppView::SettingsPerItemSpeed => AppView::Home,
         AppView::SettingsAutoDownload => AppView::Home,
+        AppView::SettingsPlayer => AppView::Home,
         // Tab deliberately falls through to here from the Keymap guard in
         // handle_key - this is what makes Tab close Keymap back to Home.
         AppView::Keymap => AppView::Home,
@@ -2669,6 +2718,12 @@ pub fn select_next(&mut self) {
             } else {
                 self.list_state_settings_auto_download.select_first();
             }}}
+        AppView::SettingsPlayer => { if let Some(selected) = self.list_state_settings_player.selected() {
+            if selected + 1 < 2 {
+                self.list_state_settings_player.select_next();
+            } else {
+                self.list_state_settings_player.select_first();
+            }}}
         // Unreachable - j/Down never reach this while Keymap is active.
         AppView::Keymap => {}
         AppView::Stats => {}
@@ -2756,6 +2811,12 @@ pub fn select_previous(&mut self) {
             } else {
                 self.list_state_settings_auto_download.select(Some(1));
             }}}
+        AppView::SettingsPlayer => { if let Some(selected) = self.list_state_settings_player.selected() {
+            if selected > 0 {
+                self.list_state_settings_player.select_previous();
+            } else {
+                self.list_state_settings_player.select(Some(1));
+            }}}
         AppView::Keymap => {}
         AppView::Stats => {}
         AppView::PodcastAdd => {
@@ -2786,6 +2847,7 @@ pub fn select_first(&mut self) {
         AppView::SettingsAutoplay => self.list_state_settings_autoplay.select_first(),
         AppView::SettingsPerItemSpeed => self.list_state_settings_per_item_speed.select_first(),
         AppView::SettingsAutoDownload => self.list_state_settings_auto_download.select_first(),
+        AppView::SettingsPlayer => self.list_state_settings_player.select_first(),
         AppView::Keymap => {}
         AppView::Stats => {}
         AppView::PodcastAdd => self.list_state_podcast_search_results.select_first(),
@@ -2824,6 +2886,7 @@ pub fn select_last(&mut self) {
         AppView::SettingsAutoplay => self.list_state_settings_autoplay.select(Some(1)),
         AppView::SettingsPerItemSpeed => self.list_state_settings_per_item_speed.select(Some(1)),
         AppView::SettingsAutoDownload => self.list_state_settings_auto_download.select(Some(1)),
+        AppView::SettingsPlayer => self.list_state_settings_player.select(Some(1)),
         AppView::Keymap => {}
         AppView::Stats => {}
         AppView::PodcastAdd => {

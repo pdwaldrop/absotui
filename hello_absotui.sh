@@ -513,7 +513,7 @@ install_packages() {
                 fi ;;
         esac
     if [[ $pkg_mgr_status -ne 0 ]]; then
-        echo "[WARNING] Your package manager reported a problem installing one or more dependencies (${dep[@]}) - see the error above. Absotui itself will still be installed, but anything needing a missing dependency (e.g. VLC for playback) won't work until you install it yourself."
+        echo "[WARNING] Your package manager reported a problem installing one or more dependencies (${dep[@]}) - see the error above. Absotui itself will still be installed, but anything needing a missing dependency (e.g. the VLC or mpv player) won't work until you install it yourself."
     else
         echo "[INFO] Packages installed successfully."
     fi
@@ -642,6 +642,7 @@ install_config() {
     fi
 
     rm -rf "$tmpdir"
+    apply_player_choice
 }
 
 dep_already_installed() {
@@ -668,6 +669,59 @@ dep_already_installed() {
     echo $installed
 }
 
+# Which player Absotui should use: the one just picked (see choose_player), else
+# whatever an existing config.toml already says, else VLC.
+wanted_player() {
+    if [[ -n "$PLAYER_CHOICE" ]]; then
+        echo "$PLAYER_CHOICE"
+    elif grep -Eq '^backend *= *"mpv"' "${CONFIG_DIR}/config.toml" 2>/dev/null; then
+        echo "mpv"
+    else
+        echo "vlc"
+    fi
+}
+
+# Asks which player to install and use (VLC by default). Skipped when
+# ABSOTUI_PLAYER=vlc|mpv is set, or when there's no terminal to ask on.
+choose_player() {
+    local current
+    current=$(wanted_player)
+    case "${ABSOTUI_PLAYER:-}" in
+        vlc|mpv) PLAYER_CHOICE="$ABSOTUI_PLAYER"; return 0;;
+        "") ;;
+        *) echo "[WARNING] ABSOTUI_PLAYER must be \"vlc\" or \"mpv\" - ignoring \"$ABSOTUI_PLAYER\".";;
+    esac
+    if ! [[ -t 0 ]]; then
+        PLAYER_CHOICE="$current"
+        return 0
+    fi
+
+    local default_num=1
+    if [[ "$current" == "mpv" ]]; then default_num=2; fi
+    echo "[HELP] Absotui plays audio through VLC (the default) or mpv. You can change this later in Settings > Player."
+    local answer
+    while :; do
+        read -p "Player: 1) VLC  2) mpv  [${default_num}] : " answer
+        answer=${answer:-$default_num}
+        case $answer in
+            1) PLAYER_CHOICE="vlc"; break;;
+            2) PLAYER_CHOICE="mpv"; break;;
+        esac
+    done
+}
+
+# Writes the picked player into config.toml, the same line Settings > Player edits.
+apply_player_choice() {
+    [[ -n "$PLAYER_CHOICE" ]] || return 0
+    local user_config="${CONFIG_DIR}/config.toml"
+    [[ -f "$user_config" ]] || return 0
+    if grep -Eq '^backend *=' "$user_config"; then
+        sed -i -E "s/^backend *=.*/backend = \"${PLAYER_CHOICE}\"/" "$user_config"
+    else
+        sed -i -E "s/^\[player\] *$/[player]\nbackend = \"${PLAYER_CHOICE}\"/" "$user_config"
+    fi
+}
+
 install_deps() {
     # Grab dependencies and optional dependencies
     # Optional deps start with "*" (e.g. *cvlc).
@@ -680,6 +734,17 @@ install_deps() {
         done < deps.txt
     else
         deps=("${HC_DEPS[@]}")
+    fi
+
+    # The player dependency is VLC unless mpv is what's wanted (linux:vlc -> linux:mpv)
+    if [[ "$(wanted_player)" == "mpv" ]]; then
+        local swapped=()
+        local d
+        for d in "${deps[@]}"; do
+            if [[ $d == *:vlc ]]; then d="${d%vlc}mpv"; fi
+            swapped+=( "$d" )
+        done
+        deps=( "${swapped[@]}" )
     fi
 
     # Ignore already installed deps
@@ -730,7 +795,7 @@ install_deps() {
 install_message() {
     echo "[INFO]"
     echo "The installation will have these effects:"
-    echo "Install dependencies if needed: VLC, Netcat, Rust, for macos: Homebrew and gsed"
+    echo "Install dependencies if needed: VLC or mpv (your choice), Netcat, Rust, for macos: Homebrew and gsed"
     echo "Add the binary in /usr/local/bin (option 1) or ~/.cargo/bin (option 2)"
     echo "For Linux:"
     echo "Add the directory "absotui" in $HOME/.config (or any other path specified in XDG_CONFIG_HOME) with inside the following files: "
@@ -742,7 +807,7 @@ install_message() {
     echo ".env, db.sqlite3, config.toml, absotui.log"
     echo " "
     echo " You can run "absotui --uninstall"/yay -R absotui-bin or the official uninstall curl link to remove all these added files."
-    echo 'Only dependencies will not be uninstalled (e.g. VLC, Netcat, Rust, gsed, Homebrew)'
+    echo 'Only dependencies will not be uninstalled (e.g. VLC, mpv, Netcat, Rust, gsed, Homebrew)'
     echo " "
 }
 
@@ -769,7 +834,7 @@ install_menu() {
                 ;;
             3)
                 echo "requirements:"
-                echo "rust, netcat, vlc, (optional : kitty)"
+                echo "rust, netcat, vlc or mpv, (optional : kitty)"
                 echo "follow these steps: "
                 echo "clone the main branch (might be unstable):"
                 echo "git clone https://github.com/pdwaldrop/absotui"
@@ -1003,7 +1068,7 @@ confirm_install_deps_macos() {
 
     if [[ "$OS" == "macOS" ]]; then
 
-        echo "[IMPORTANT] If you select 1, the script will automatically fetch and install the required dependencies (Brew, VLC, Netcat, gsed) if they are missing."
+        echo "[IMPORTANT] If you select 1, the script will automatically fetch and install the required dependencies (Brew, VLC or mpv - whichever you picked, Netcat, gsed) if they are missing."
         echo "[IMPORTANT] Please note: package detection via Homebrew can sometimes be unreliable (but it's not risky). If you encounter issues, install the packages by yourself and select 2."
 
         while :; do
@@ -1020,7 +1085,7 @@ confirm_install_deps_macos() {
             option2)
                 ;;
             quit)
-                echo "Installation aborted. Install required dependencies Brew, VLC, Netcat and gsed and perfom again an install"
+                echo "Installation aborted. Install required dependencies Brew, VLC (or mpv), Netcat and gsed and perfom again an install"
                 exit 0
                 ;;
         esac
@@ -1035,6 +1100,7 @@ install_absotui() {
     fi
     install_message
     install_menu
+    choose_player
     if [[ "$install_method" == "binary" ]]; then
         echo "Install the binary..."
         confirm_install_deps_macos
@@ -1233,7 +1299,7 @@ uninstall_message() {
     echo "[IMPORTANT] save your config.toml if you need it later"
     echo "[IMPORTANT] XDG_CONFIG_HOME must be the same as it was at the time Absotui was installed. (in case you change it)"
     echo " "
-    echo 'Only dependencies will not be uninstalled (e.g. VLC, Netcat, Rust, Homebrew, gsed)'
+    echo 'Only dependencies will not be uninstalled (e.g. VLC, mpv, Netcat, Rust, Homebrew, gsed)'
     echo " "
 }
 

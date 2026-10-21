@@ -374,3 +374,67 @@ and the real one, the fake in the conversation scratch space is not kept - read
 `Auth.js`/`OidcAuthStrategy.js` again. Still on the list from earlier entries:
 `ubuntu-latest` becomes Ubuntu 26 on 2026-10-19, so watch the first release cut
 after that date.
+
+### 2026-10-20 — Claude Code (PR #12 merged, player choice in Settings + installer)
+
+**What changed:** Reviewed and merged PR #12 (Crashdummyy's mpv backend; thanked
+them on the PR). Then, on top of it, with Paul's requirements that nobody should
+have to hand-edit `config.toml` and that the installer should offer the choice:
+(1) a new **Settings > Player** screen (VLC / mpv) that saves the choice as the
+`backend` line under `[player]` in `config.toml` and switches the running app to
+it; it refuses while something is playing and when the chosen program isn't
+installed, and takes effect on the next play. The choice lives in `config.toml`
+(not the sqlite settings) on purpose: it's a per-machine fact, and the installer
+already keeps the user's value across updates. (2) The install script now asks
+"VLC or mpv" (default VLC; skipped with `ABSOTUI_PLAYER=vlc|mpv` or when there's no
+terminal), installs that package, writes `backend`, and on `--update` keeps
+installing the player the existing config names instead of pulling VLC back in.
+(3) The PR's `Player::quit` had widened the macOS-only `pkill VLC` to two places it
+never ran before (the startup leftover-session check and the stop key); those now
+use a new `quit_gracefully` without it. (4) CLAUDE.md's player section rewritten
+for the `Player` enum, README and `config.example.toml` updated. (5) mpv failures
+are no longer silent: an mpv control-socket path over the OS limit (108 bytes on
+Linux, 104 on macOS) is refused up front with a message naming the length and the fix
+(before this, mpv started anyway with no control socket and would have played on
+unreachable), and any player that exits with a failure status now logs the status and
+the tail of its stderr (e.g. "exited abnormally (exit status: 2): ... couldn't open
+play stream" when mpv has no audio output). (6) The shared one-line status message
+helper (`pop_message`, 43 call sites) now clears its row before printing: it writes
+straight to the terminal, so a shorter message used to land on top of the leftover
+tail of a longer one ("...change the playern try again"). Reproduced before the fix
+and gone after; checked the rows it uses (3, 2 and 6 from the bottom) sit in blank
+space on the Settings screens and the login screen, so clearing the row hides no UI.
+
+**How it was verified:** `cargo build`/`clippy`/`test` clean (93 passed: 82 plus 11
+new - rewriting the `backend` line, the socket-path limit, and the stderr summary; clippy shows only the existing
+`too_many_arguments` warnings). Live, against a throwaway fake Audiobookshelf on
+127.0.0.1 with its own config dir, VLC port and mpv socket (Paul's real config, server,
+VLC port 1234 and running session were not touched - his db showed a live session, so
+a copy of it was deliberately not used): the Player screen lists and saves the
+choice with only that one line changed, the choice survives a restart and is
+preselected, switching is refused with a clear message when the program isn't on
+PATH and while the running flag is set, and a real switch mpv -> VLC without
+restarting made the server see `mediaPlayer=mpv v0.41.0` and then `VLC v3.0.24` for
+consecutive plays (mpv's stop key also verified). Failure logging, live: a 126-byte
+socket path was refused in ~0.1 s with the clear message and no mpv left running; mpv
+with no audio server logged exit status 2 plus the audio error; a normal play + stop
+logged no false warning on either mpv or VLC. Installer: its new functions were
+run in a harness with package installs stubbed and a scratch config dir (default,
+env override, bad env value, reinstall, update-keeps-mpv, old config without the key,
+and the prompt on a real tty with Enter / 1 / 2 / invalid input).
+
+**Not verified:** a real package install through the script (apt/dnf/pacman/brew),
+mpv's package name and availability on Fedora/CentOS/openSUSE/Homebrew, anything on
+macOS (including the `pkill` scoping and `sed -i` via gsed), and the update path
+end to end. The Settings > Player screen was not checked on a narrow terminal.
+
+**Open questions / handoff:** Nothing here is committed yet - waiting on Paul's
+go-ahead. No changelog entry was added; that belongs to the release that ships
+this. `hello_absotui.sh` and `config.example.toml` changed, so the existing
+stable-sync workflow will pick them up at the next release as usual. Still true for
+any player: if it starts but never becomes reachable for another reason, Absotui can't
+stop it (it never gets a handle on the process) - the socket-path check only closes the
+one known cause. Honest framing of mpv for any
+docs: it is an alternative, not a proven upgrade (measured: a cleaner control
+channel and a ~0.5 s faster first position; its full dependency tree on Arch was
+larger than VLC's, not smaller).

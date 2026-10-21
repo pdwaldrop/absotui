@@ -3,7 +3,7 @@ use std::process::Command;
 use std::process::Output;
 use log::error;
 use crate::player::backend::{Player, Vlc};
-use crate::player::mpv::mpv_command;
+use crate::player::mpv::{check_socket_path, mpv_command};
 use crate::player::session::{Track, TrackSource};
 use crate::player::vlc::exec_nc::exec_nc;
 use crate::db::crud::{get_speed_rate, get_is_per_item_speed, get_item_speed_rate, set_item_speed_rate};
@@ -52,6 +52,10 @@ impl Player {
                     error!("[start][exec_nc] {e}");
                 }
             });
+        }
+
+        if let Player::Mpv { socket } = self {
+            check_socket_path(socket)?;
         }
 
         let mut cmd = match self {

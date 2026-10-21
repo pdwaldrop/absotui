@@ -15,6 +15,7 @@ use ratatui::{
 use crate::utils::convert_seconds::{convert_seconds_for_prg, format_age, format_duration};
 use crate::utils::format_size::format_size;
 use crate::db::crud::{get_listening_session, get_is_podcast_autoplay, get_is_vlc_running, get_is_per_item_speed, get_is_auto_download};
+use crate::player::backend::Backend;
 use crate::player::integrated::player_info::{format_time, find_current_chapter};
 use crate::utils::html_to_text::html_to_lines;
 use crate::utils::cover_cache::{cover_cache_path, fetch_and_cache_cover, fetch_and_cache_episode_cover, fetch_and_cache_external_cover};
@@ -57,6 +58,7 @@ impl Widget for &mut App {
             AppView::SettingsAutoplay => self.render_settings_autoplay(area, buf),
             AppView::SettingsPerItemSpeed => self.render_settings_per_item_speed(area, buf),
             AppView::SettingsAutoDownload => self.render_settings_auto_download(area, buf),
+            AppView::SettingsPlayer => self.render_settings_player(area, buf),
             AppView::Keymap => self.render_keymap(area, buf),
             AppView::Collections => self.render_collections(area, buf),
             AppView::Stats => self.render_stats(area, buf),
@@ -932,6 +934,28 @@ impl App {
             .render(item_area, buf);
     }
 
+    /// `AppView::SettingsPlayer` rendering
+    fn render_settings_player(&mut self, area: Rect, buf: &mut Buffer) {
+        let mut hints = vec![("h", "Back"), ("l/→", "Apply")];
+        hints.extend(Self::footer_trailer("Home", false));
+        let text_render_footer = theme::footer_text(&hints);
+        let [header_area, main_area, _player_area, _refresh_area, footer_area] = self.standard_layout(area, &text_render_footer);
+
+        let [list_area, item_area] = Layout::vertical([Constraint::Fill(1), Constraint::Fill(1),]).areas(main_area);
+
+        let render_list_title = "Player";
+        let options = vec![Backend::Vlc.label().to_string(), Backend::Mpv.label().to_string()];
+        let current = self.config.player.backend.label();
+
+        App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
+        App::render_footer(footer_area, buf, &text_render_footer);
+        self.render_list(list_area, buf, render_list_title, &options, &mut self.list_state_settings_player.clone(), None);
+        Paragraph::new(format!("Currently: {current}\n\nWhich program plays your audio. VLC is the default; mpv is an alternative. It has to be installed on this machine - Absotui tells you if it isn't. Takes effect the next time you play something, and can't be changed while something is playing. Saved as `backend` under `[player]` in config.toml, so it survives updates. The cvlc, cvlc_term, address and port options in config.toml only apply to VLC."))
+            .left_aligned()
+            .wrap(Wrap { trim: true })
+            .block(theme::section_block("Description"))
+            .render(item_area, buf);
+    }
 
     /// `AppView::SearchBook` rendering
     fn render_search_book(&mut self, area: Rect, buf: &mut Buffer) {
@@ -1451,7 +1475,7 @@ impl App {
                 hints.extend(Self::footer_trailer("Home", false));
                 hints
             }
-            AppView::SettingsAutoplay | AppView::SettingsPerItemSpeed | AppView::SettingsAutoDownload => {
+            AppView::SettingsAutoplay | AppView::SettingsPerItemSpeed | AppView::SettingsAutoDownload | AppView::SettingsPlayer => {
                 let mut hints = vec![("h", "Back to Settings"), ("l/→ Enter", "Apply selected option"), ("R", "Refresh")];
                 hints.extend(globals);
                 hints.extend(Self::footer_trailer("Home", false));
@@ -1613,7 +1637,7 @@ impl App {
         // so stays ACCENT_STRUCTURE.
         let list_accent = match self.view_state {
             AppView::SettingsLibrary | AppView::SettingsAutoplay | AppView::SettingsAccount
-                | AppView::SettingsPerItemSpeed | AppView::SettingsAutoDownload | AppView::PodcastAdd => theme::ACCENT_KEY,
+                | AppView::SettingsPerItemSpeed | AppView::SettingsAutoDownload | AppView::SettingsPlayer | AppView::PodcastAdd => theme::ACCENT_KEY,
             _ => theme::ACCENT_STRUCTURE,
         };
         let block = theme::section_block(render_list_title).border_style(Style::new().fg(list_accent));
