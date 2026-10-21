@@ -59,6 +59,9 @@ pub fn diagnose_rejected_login(token: &str, had_refresh_token: bool, address: &s
         (None, _) => format!("The server rejected your saved API token. It was deleted or revoked on \
             the server, or it belongs to a different server than {address}."),
     };
+    if let Some(clock_note) = crate::api::server::refresh_token::clock_skew_note() {
+        return LoginProblem(format!("{clock_note} If Retry still fails: {why} {RELOGIN_STEPS}"));
+    }
     LoginProblem(format!("{why} {RELOGIN_STEPS}"))
 }
 

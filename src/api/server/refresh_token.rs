@@ -5,7 +5,8 @@ use color_eyre::eyre::{Result, Report};
 use serde::Deserialize;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use log::{info, error};
+use log::{info, warn, error};
+use std::sync::atomic::{AtomicI64, Ordering};
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -25,6 +26,67 @@ struct RefreshResponse {
 // playback, ~200ms in the main render loop) never has a realistic chance of still
 // being caught holding an expired token.
 const REFRESH_MARGIN_SECS: i64 = 10 * 60;
+
+// Server time minus this computer's time, in seconds, measured from the server's own
+// `Date` header (see `sync_clock_with_server`). Token expiry is the server's clock, so
+// every "is it expired / about to expire" check has to be made on the server's time - on
+// a computer whose clock is off, a token the server already rejects looks valid locally
+// and never gets refreshed.
+static CLOCK_OFFSET_SECS: AtomicI64 = AtomicI64::new(0);
+
+// Below this a difference is just noise; above it the error screen says so.
+const CLOCK_SKEW_NOTE_SECS: i64 = 120;
+
+fn server_now() -> i64 {
+    chrono::Utc::now().timestamp() + CLOCK_OFFSET_SECS.load(Ordering::Relaxed)
+}
+
+fn clock_offset_from_date_header(date_header: &str, local_now: i64) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc2822(date_header).ok().map(|server_time| server_time.timestamp() - local_now)
+}
+
+/// Measures how far this computer's clock is from the server's, from the `Date` header
+/// of a public request, and remembers it for every expiry check. A failure leaves the
+/// previous value (0 at startup), i.e. the old behavior of trusting the local clock.
+pub async fn sync_clock_with_server(server_address: &str) {
+    let before = chrono::Utc::now().timestamp();
+    let Ok(response) = api_client().get(format!("{server_address}/ping")).send().await else {
+        return;
+    };
+    let local_now = (before + chrono::Utc::now().timestamp()) / 2;
+    let Some(offset) = response
+        .headers()
+        .get(reqwest::header::DATE)
+        .and_then(|date| date.to_str().ok())
+        .and_then(|date| clock_offset_from_date_header(date, local_now))
+    else {
+        return;
+    };
+    CLOCK_OFFSET_SECS.store(offset, Ordering::Relaxed);
+    if offset.abs() >= CLOCK_SKEW_NOTE_SECS {
+        warn!("[sync_clock_with_server] This computer's clock differs from the server's by {offset}s");
+    }
+}
+
+fn describe_clock_skew(offset: i64) -> Option<String> {
+    if offset.abs() < CLOCK_SKEW_NOTE_SECS {
+        return None;
+    }
+    let minutes = offset.abs() / 60;
+    let amount = if minutes >= 60 { format!("{} h {} min", minutes / 60, minutes % 60) } else { format!("{minutes} min") };
+    let direction = if offset > 0 { "behind" } else { "ahead of" };
+    Some(format!(
+        "This computer's clock is about {amount} {direction} the server's, and saved logins expire by the clock - \
+         a wrong clock can make a working login look dead. Fix the clock (on Linux: sudo timedatectl set-ntp true), \
+         then press Retry."
+    ))
+}
+
+/// Set only when this computer's clock is clearly off from the server's - the error
+/// screen leads with it, since it explains an otherwise baffling "rejected" login.
+pub fn clock_skew_note() -> Option<String> {
+    describe_clock_skew(CLOCK_OFFSET_SECS.load(Ordering::Relaxed))
+}
 
 /// Exchanges a refresh token for a new (access token, refresh token) pair via
 /// Audiobookshelf's `POST /auth/refresh`. The refresh token **rotates on every use**
@@ -75,13 +137,17 @@ pub async fn refresh_access_token(server_address: &str, refresh_token: &str) -> 
 /// it, never untrusted input. Returns `false` (don't refresh) for anything that isn't
 /// a 3-part JWT, which is what makes this a no-op for legacy non-expiring tokens.
 fn is_token_expiring_soon(token: &str) -> bool {
-    token_exp(token).is_some_and(|exp| exp - chrono::Utc::now().timestamp() < REFRESH_MARGIN_SECS)
+    expiring_soon_at(token, server_now())
+}
+
+fn expiring_soon_at(token: &str, now: i64) -> bool {
+    token_exp(token).is_some_and(|exp| exp - now < REFRESH_MARGIN_SECS)
 }
 
 /// `Some(true)`/`Some(false)` for a JWT with an `exp` claim, `None` for anything else
 /// (a legacy non-expiring token) - used only to explain a rejected login.
 pub fn is_token_expired(token: &str) -> Option<bool> {
-    token_exp(token).map(|exp| exp <= chrono::Utc::now().timestamp())
+    token_exp(token).map(|exp| exp <= server_now())
 }
 
 fn token_exp(token: &str) -> Option<i64> {
@@ -126,6 +192,20 @@ pub async fn maybe_refresh_token(
     if refresh_token.is_empty() || !is_token_expiring_soon(token) {
         return RefreshOutcome::NotNeeded;
     }
+    refresh_now(token, refresh_token, username, server_address).await
+}
+
+/// Refreshes whatever the token's own expiry says - for when the server has just rejected
+/// a token that looked fine (see `App::new`'s retry after a 401).
+pub async fn refresh_now(
+    token: &mut String,
+    refresh_token: &mut String,
+    username: &str,
+    server_address: &str,
+) -> RefreshOutcome {
+    if refresh_token.is_empty() {
+        return RefreshOutcome::NotNeeded;
+    }
 
     match refresh_access_token(server_address, refresh_token).await {
         Ok((new_access_token, new_refresh_token)) => {
@@ -133,15 +213,15 @@ pub async fn maybe_refresh_token(
                 (Ok(enc_access), Ok(enc_refresh)) => {
                     let _ = update_user_tokens(username, &enc_access, &enc_refresh);
                 }
-                _ => error!("[maybe_refresh_token] Refreshed the token but couldn't encrypt it for storage - the DB will keep the old one until next login"),
+                _ => error!("[refresh_now] Refreshed the token but couldn't encrypt it for storage - the DB will keep the old one until next login"),
             }
             *token = new_access_token;
             *refresh_token = new_refresh_token;
-            info!("[maybe_refresh_token] Access token refreshed for {username}");
+            info!("[refresh_now] Access token refreshed for {username}");
             RefreshOutcome::Refreshed
         }
         Err(e) => {
-            error!("[maybe_refresh_token] Refresh failed for {username}: {e}");
+            error!("[refresh_now] Refresh failed for {username}: {e}");
             if e.downcast_ref::<RefreshRejected>().is_some() {
                 RefreshOutcome::Failed
             } else {
@@ -185,6 +265,38 @@ mod tests {
         assert_eq!(is_token_expired(&fake_jwt_with_exp(now - 60)), Some(true));
         assert_eq!(is_token_expired(&fake_jwt_with_exp(now + 3600)), Some(false));
         assert_eq!(is_token_expired("opaque-legacy-token"), None);
+    }
+
+    #[test]
+    fn expiry_is_judged_on_the_servers_clock_not_a_slow_local_one() {
+        let server_time = 1_800_000_000;
+        // Expired 2 minutes ago by the server's clock...
+        let token = fake_jwt_with_exp(server_time - 120);
+        // ...but a local clock running an hour slow still sees ~58 minutes left.
+        let local_time = server_time - 3600;
+        assert!(!expiring_soon_at(&token, local_time));
+        assert!(expiring_soon_at(&token, local_time + 3600));
+    }
+
+    #[test]
+    fn clock_offset_comes_from_the_date_header() {
+        let local_now = 1_800_000_000;
+        let server_ahead = chrono::DateTime::from_timestamp(local_now + 3900, 0).unwrap().to_rfc2822();
+        assert_eq!(clock_offset_from_date_header(&server_ahead, local_now), Some(3900));
+        assert_eq!(clock_offset_from_date_header("Wed, 21 Oct 2026 04:46:46 GMT", 1_792_558_006), Some(0));
+        assert_eq!(clock_offset_from_date_header("not a date", local_now), None);
+    }
+
+    #[test]
+    fn clock_skew_is_only_called_out_when_it_is_clearly_off() {
+        assert_eq!(describe_clock_skew(0), None);
+        assert_eq!(describe_clock_skew(-90), None);
+        assert_eq!(describe_clock_skew(119), None);
+        let behind = describe_clock_skew(3900).unwrap();
+        assert!(behind.contains("1 h 5 min behind the server's"), "{behind}");
+        assert!(behind.contains("timedatectl set-ntp true"), "{behind}");
+        assert!(describe_clock_skew(-600).unwrap().contains("10 min ahead of the server's"));
+        assert!(describe_clock_skew(300).unwrap().contains("5 min behind"));
     }
 
     #[test]

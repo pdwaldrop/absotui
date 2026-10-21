@@ -26,7 +26,7 @@ use crate::logic::handle_input::handle_add_podcast::create_and_seed_podcast;
 use crate::logic::server_recovery::{diagnose_rejected_login, LoginProblem};
 use crate::config::{ConfigFile, load_config, set_backend};
 use crate::db::crud::{get_is_show_key_bindings, update_is_show_key_bindings, get_is_speed_adjusted_time, update_is_speed_adjusted_time, update_is_podcast_autoplay, delete_user, update_id_selected_lib, get_listening_session, get_is_vlc_running, update_is_per_item_speed, update_is_finished, get_is_auto_download, update_is_auto_download, update_pending_seek, update_login_err};
-use crate::api::server::refresh_token::{maybe_refresh_token, RefreshOutcome};
+use crate::api::server::refresh_token::{maybe_refresh_token, refresh_now, sync_clock_with_server, RefreshOutcome};
 use crate::db::database_struct::Database;
 use crate::utils::convert_seconds::format_duration;
 use crate::utils::download_cache::{is_downloaded, remove_download, download_book, download_episode, sync_auto_downloads, sync_auto_downloads_podcasts};
@@ -750,6 +750,10 @@ impl App {
             }
         }
 
+        // Expiry is the server's clock, so learn how far this computer's is from it first -
+        // see refresh_token.rs's CLOCK_OFFSET_SECS.
+        sync_clock_with_server(&server_address).await;
+
         // Proactively refresh before the very first API call below - otherwise any
         // access token that already expired while the app wasn't running (they last
         // ~1 hour) makes this fail with a 401 before `refresh_token_if_needed` ever
@@ -767,7 +771,16 @@ impl App {
         }
 
         let had_refresh_token = !refresh_token.is_empty();
-        let all_libraries = match get_all_libraries(&token, server_address.clone()).await {
+        let mut libraries_result = get_all_libraries(&token, server_address.clone()).await;
+        // The server rejected a token that looked fine (whatever the reason - the clock,
+        // a session it dropped): renew it once and retry before giving up on the login.
+        // Any other refresh outcome falls through to the diagnosis below untouched.
+        if libraries_result.as_ref().is_err_and(|e| e.to_string().contains("HTTP 401"))
+            && refresh_now(&mut token, &mut refresh_token, &username, &server_address).await == RefreshOutcome::Refreshed
+        {
+            libraries_result = get_all_libraries(&token, server_address.clone()).await;
+        }
+        let all_libraries = match libraries_result {
             Ok(libraries) => libraries,
             Err(e) if e.to_string().contains("HTTP 401") => {
                 return Err(Report::new(diagnose_rejected_login(&token, had_refresh_token, &server_address)));
