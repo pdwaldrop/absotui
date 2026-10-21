@@ -438,3 +438,37 @@ one known cause. Honest framing of mpv for any
 docs: it is an alternative, not a proven upgrade (measured: a cleaner control
 channel and a ~0.5 s faster first position; its full dependency tree on Arch was
 larger than VLC's, not smaller).
+
+### 2026-10-20 — Claude Code (v0.11.0 release)
+
+**What changed:** Cut v0.11.0 (minor - a new user-facing feature, same call as
+v0.9.0 and v0.10.0): the player choice (VLC / mpv) in Settings > Player and in the
+install script, on top of Crashdummyy's mpv backend (PR #12), plus the failure
+logging, the `pkill VLC` scoping, and the status-message fix from the entry above.
+The v0.10.0 changelog entry was frozen and a v0.11.0 one added (it credits
+Crashdummyy) before cutting.
+
+**How it was verified:** The Cut Release and Release workflows both succeeded and
+all three binary builds plus the checksum job passed; the release has all 12 assets
+(3 tarballs, 2 AppImages, 2 `.zsync`, desktop file, svg, `config.example.toml`,
+`hello_absotui.sh`, `SHA256SUMS.txt`). Downloaded every file and checked it against
+`SHA256SUMS.txt` (all match). The released x86_64 binary and the AppImage both report
+0.11.0, and the binary contains the new code (Settings > Player text, the socket-path
+check, the abnormal-exit log, the new changelog). Highest glibc requirement, read from
+the ELF table, is still 2.34 on x86_64 (2.18 on aarch64). The macOS tarball is a
+universal binary. The files the installer fetches live from `stable`
+(`hello_absotui.sh`, `config.example.toml`, `absotui.desktop`, `absotui.svg`) are
+byte-identical to the release assets, and `main`, `stable` and the tag all sit on the
+bump commit. The `ubuntu-latest` jobs (cut-release and the aarch64 build) ran on
+Ubuntu 24.04, so GitHub's move to 26 has not reached this repo yet and still needs
+watching on a later release.
+
+**Not verified:** running the install script for real (the new player prompt, a real
+package install, and an `--update` from 0.10.0) on any machine; mpv's package name
+on Fedora/CentOS/openSUSE/Homebrew; anything on macOS; the aarch64 binary was only
+inspected, not run.
+
+**Open questions / handoff:** First thing to do: run the installer on the Fedora
+test box, once with VLC and once with `ABSOTUI_PLAYER=mpv`, then `--update` from an
+older install. This entry is the only commit after the release bump, so `stable`
+stays on the bump commit, which is fine (no installed file changed).
