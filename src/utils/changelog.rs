@@ -1275,8 +1275,7 @@ let changelog_77 = "Changelog Absotui v0.9.5 (06/10/2026) \n\
          \n\
          Enjoy!\n
          ####\n".to_string();
-let changelog_78 = format!(
-    "Changelog Absotui v{VERSION} (13/10/2026) \n\
+let changelog_78 = "Changelog Absotui v0.10.0 (13/10/2026) \n\
          \n\
          New:\n\
          - Sign in through your server's identity provider (SSO / OpenID\n\
@@ -1292,10 +1291,40 @@ let changelog_78 = format!(
            More in the README.\n\
          \n\
          Enjoy!\n
+         ####\n".to_string();
+let changelog_79 = format!(
+    "Changelog Absotui v{VERSION} (20/10/2026) \n\
+         \n\
+         New:\n\
+         - Choose your player. Absotui can now play through mpv as well as\n\
+           VLC (VLC stays the default). Switch in Settings > Player - it\n\
+           applies the next time you play something, and Absotui tells you\n\
+           if the player you picked isn't installed. The install script now\n\
+           asks which one to install, and keeps that choice when you update.\n\
+           More in the README.\n\
+         \n\
+         Changed:\n\
+         - Playback code was reorganized to support more than one player.\n\
+           VLC users shouldn't notice anything except that moving between\n\
+           the files of a multi-file book is quicker.\n\
+         - If mpv can't start, Absotui now logs the reason instead of just\n\
+           \"Player didn't come up\".\n\
+         \n\
+         Fixed:\n\
+         - A one-line status message at the bottom of the screen could be\n\
+           garbled by leftover text from a longer message shown just before\n\
+           it. They now start clean.\n\
+         \n\
+         Contributors:\n\
+         \n\
+         - Crashdummyy (mpv support)\n\
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_79);
     changelog.push_str(&changelog_78);
     changelog.push_str(&changelog_77);
     changelog.push_str(&changelog_76);
