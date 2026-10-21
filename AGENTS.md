@@ -472,3 +472,48 @@ inspected, not run.
 test box, once with VLC and once with `ABSOTUI_PLAYER=mpv`, then `--update` from an
 older install. This entry is the only commit after the release bump, so `stable`
 stays on the bump commit, which is fine (no installed file changed).
+
+### 2026-10-20 — Claude Code (config merge bug in the install script's update, found after v0.11.0)
+
+**What happened:** Right after Paul ran `absotui --update` to v0.11.0 on his main
+desktop, Absotui wouldn't start: "TOML parse error at line 30 ... duplicate key" on
+`[auth]` in `config.toml`. His file had the `[auth]` block twice.
+
+**Root cause (pre-existing since v0.10.0, not caused by the player work):** the
+installer merges new options into the user's `config.toml` on every update, and it
+finds a section's end with the regex `^\[[^($section)]`. That's a character class,
+so any header whose first letter appears in the section's name (e.g. `[auth]` after
+`[player]`) doesn't end the section. The first update after v0.10.0 is fine, but it
+drops the `#### SIGN-IN ####` comment line that had been acting as the boundary; the
+second update then pulls `[auth]` into the `[player]` section and writes it twice.
+Anyone who updated through the script twice since v0.10.0 (including 0.9.x -> 0.10.0
+-> 0.11.0) gets this, and Absotui can't start. Reproduced exactly with Paul's
+pre-update file, and from the shipped example config updated twice.
+
+**What changed (uncommitted at the time of writing):** (1) `hello_absotui.sh`: a
+section now ends at the next `####` line or the next `[header]` that isn't its own.
+(2) A safety net: if the merged result would repeat any `[section]`, the installer
+prints a warning and leaves the user's config exactly as it was (missing options fall
+back to defaults, so that is always safe). (3) v0.11.1 changelog entry prepared.
+
+**How it was verified:** In a harness that sources the script with network and
+package installs stubbed, against scratch config dirs: Paul's reconstructed pre-update
+file and the shipped example updated 1, 2 and 3 times (no duplicates, and update 2 ==
+update 3); a copy of his currently broken file is repaired by one run; custom values
+(player port/address/backend, sso port, auto-download count, colors) survive two
+updates; the player-choice cases still pass; and with the old boundary re-injected
+the safety net refuses to write and leaves the file byte-for-byte unchanged. Output was
+parsed with a real TOML parser (`tomllib`), not just grepped. `cargo build`/`test`/
+`clippy` unchanged and clean (93 passed).
+
+**Own gap:** my v0.11.0 installer checks ran `install_config` once and only looked
+at the `backend` line, so a second update (which would have shown the duplicate
+header) was never exercised. The bug predates my change, but the check that would
+have caught it was mine to run.
+
+**Open questions / handoff:** The fix only reaches users via a release, because
+`hello_absotui.sh` is served from `stable`. Affected users can repair themselves with
+`absotui --update` once it's out (the `--update` flag is handled before the config is
+read, so it works even with the broken file). Until then, deleting the second
+`[auth]` block from `config.toml` fixes it by hand. Paul's own `config.toml` has not
+been touched by this session.

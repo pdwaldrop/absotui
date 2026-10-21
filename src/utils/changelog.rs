@@ -1292,8 +1292,7 @@ let changelog_78 = "Changelog Absotui v0.10.0 (13/10/2026) \n\
          \n\
          Enjoy!\n
          ####\n".to_string();
-let changelog_79 = format!(
-    "Changelog Absotui v{VERSION} (20/10/2026) \n\
+let changelog_79 = "Changelog Absotui v0.11.0 (20/10/2026) \n\
          \n\
          New:\n\
          - Choose your player. Absotui can now play through mpv as well as\n\
@@ -1320,10 +1319,26 @@ let changelog_79 = format!(
          - Crashdummyy (mpv support)\n\
          \n\
          Enjoy!\n
+         ####\n".to_string();
+let changelog_80 = format!(
+    "Changelog Absotui v{VERSION} (20/10/2026) \n\
+         \n\
+         Fixed:\n\
+         - Updating through the install script (absotui --update) could\n\
+           leave your config.toml with the [auth] section written twice.\n\
+           Absotui then wouldn't start and showed \"TOML parse error ...\n\
+           duplicate key\". It happened on the second script update after\n\
+           v0.10.0. The updater now merges the file correctly, repairs a\n\
+           config that's already in that state the next time you update\n\
+           (run absotui --update), and leaves your config untouched rather\n\
+           than write one it would break.\n\
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_80);
     changelog.push_str(&changelog_79);
     changelog.push_str(&changelog_78);
     changelog.push_str(&changelog_77);
