@@ -36,8 +36,8 @@ pub fn wait_prev_session_finished(username: String) -> bool {
             // Bounded to ~20s (same cap `quit_app` already uses in
             // sync_session_from_database.rs for the symmetric "wait for the other
             // task's cleanup" problem) rather than looping forever. A legitimate wait
-            // here is short: this call's own quit_vlc/pkill_vlc just killed the
-            // previous track's VLC process, so that track's own poll loop should
+            // here is short: the caller's own player.quit() just killed the
+            // previous track's player process, so that track's own poll loop should
             // notice the death and release the slot within a few seconds. If nothing
             // has released it after 20s, there's no teardown to wait for at all -
             // this attempt lost a claim race against another overlapping

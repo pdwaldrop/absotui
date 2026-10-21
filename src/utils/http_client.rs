@@ -7,7 +7,7 @@ use std::time::Duration;
 // playback task, and `wait_prev_session_finished` blocks every future play attempt until
 // that task signals it finished - so one hung request could wedge playback with no way
 // out but restarting the app (see known_bugs.md `bug_id: bf10cd`). Same idea as the read
-// timeout on the VLC RC socket in `vlc_tcp_stream.rs`.
+// timeouts on the player control sockets.
 
 // Generous enough not to abort a legitimately slow-but-working request (measured
 // round-trips against a real server sit around 1-2s, so this is ~30x headroom, and a

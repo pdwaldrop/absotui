@@ -1,3 +1,4 @@
+use crate::player::backend::Player;
 use crate::api::utils::collect_personalized_view::{collect_titles_cnt_list, collect_auth_names_cnt_list, collect_pub_year_cnt_list, collect_duration_cnt_list, collect_size_cnt_list, collect_desc_cnt_list, collect_ids_cnt_list};
 use crate::api::utils::collect_personalized_view_pod::{collect_ids_pod_cnt_list, collect_titles_cnt_list_pod, collect_ids_ep_pod_cnt_list, collect_subtitles_pod_cnt_list, collect_nums_ep_pod_cnt_list, collect_seasons_pod_cnt_list, collect_authors_pod_cnt_list, collect_descs_pod_cnt_list, collect_titles_pod_cnt_list, collect_durations_pod_cnt_list, collect_progress_pod_cnt_list, collect_published_at_pod_cnt_list, collect_embedded_cover_ino_pod_cnt_list};
 use crate::api::utils::collect_get_all_books::{collect_titles_library, collect_ids_library, collect_auth_names_library, collect_auth_names_library_pod, collect_published_year_library, collect_desc_library, collect_duration_library, collect_series_library};
@@ -43,7 +44,6 @@ use crate::utils::pop_up_message::{pop_message, clear_message};
 use crate::utils::changelog::changelog;
 use crate::utils::encrypt_token::decrypt_token;
 use std::io::stdout;
-use crate::player::vlc::quit_vlc::{quit_vlc, pkill_vlc};
 use crate::logic::sync_session::sync_session_from_database::quit_app;
 use crate::logic::sync_session::wait_prev_session_finished::wait_prev_session_finished;
 use crate::player::integrated::handle_key_player::handle_key_player;
@@ -348,9 +348,7 @@ pub struct App {
     pub book_progress_cnt_list_cur_time: Vec<Vec<f64>>,
     pub book_progress_search_book: Vec<Vec<String>>,
     pub book_progress_search_book_cur_time: Vec<Vec<f64>>,
-    pub is_cvlc: String,
-    pub is_cvlc_term: String,
-    pub start_vlc_program: String,
+    pub player: Player,
     pub config: ConfigFile,
     pub changelog: String,
     pub update_msg: String,
@@ -1047,21 +1045,7 @@ impl App {
     // entered before that.
     let keymap_return_view = AppView::Home;
 
-    let is_cvlc = config.player.cvlc.clone();
-    let is_cvlc_term = config.player.cvlc_term.clone();
-    // On Linux, `cvlc = "1"` selects the actual `cvlc` binary; macOS has no separate
-    // cvlc binary to select (VLC.app is the only one), so this always launches that
-    // one regardless. Whether playback runs headless is a *separate* question, decided
-    // in start_vlc.rs purely from `is_cvlc` (see bug_id fe4116) - previously this
-    // override discarded `is_cvlc` outright on macOS, which is what made the setting
-    // do nothing there.
-    let mut start_vlc_program = match is_cvlc.as_str() {
-        "1" => "cvlc".to_string(),
-        _ => "vlc".to_string(),
-    };
-    if cfg!(target_os = "macos") {
-        start_vlc_program = "/Applications/VLC.app/Contents/MacOS/VLC".to_string();
-    }
+    let player = Player::from_config(&config.player);
 
     // Every list starts with its first row selected.
     let mut list_state_cnt_list = ListState::default();
@@ -1226,9 +1210,7 @@ impl App {
         book_progress_cnt_list_cur_time,
         book_progress_search_book,
         book_progress_search_book_cur_time,
-        is_cvlc,
-        is_cvlc_term,
-        start_vlc_program,
+        player,
         config,
         changelog,
         update_msg,
@@ -1359,8 +1341,6 @@ impl App {
 
 
 pub fn handle_key(&mut self, key: KeyEvent) {
-    let mut is_playback = true;
-
     if key.kind != KeyEventKind::Press {
         return;
     }
@@ -1708,51 +1688,51 @@ pub fn handle_key(&mut self, key: KeyEvent) {
         // PLAYER //
         // toggle playback/pause
         KeyCode::Char(' ') => {
-            let _ = handle_key_player(" ", self.config.player.address.as_str(), self.config.player.port.as_str(), &mut is_playback, self.username.as_str());
+            let _ = handle_key_player(" ", &self.player, self.username.as_str());
         }
         // jump forward
         KeyCode::Char('p') => {
-            let _ = handle_key_player("p", self.config.player.address.as_str(), self.config.player.port.as_str(), &mut is_playback, self.username.as_str());
+            let _ = handle_key_player("p", &self.player, self.username.as_str());
         }
 
         // jump backward
         KeyCode::Char('u') => {
-            let _ = handle_key_player("u", self.config.player.address.as_str(), self.config.player.port.as_str(), &mut is_playback, self.username.as_str());
+            let _ = handle_key_player("u", &self.player, self.username.as_str());
         }
 
         // next chapter
         KeyCode::Char('P') => {
-            let _  = handle_key_player("P", self.config.player.address.as_str(), self.config.player.port.as_str(), &mut is_playback, self.username.as_str());
+            let _  = handle_key_player("P", &self.player, self.username.as_str());
         }
 
         // previous chapter
         KeyCode::Char('U') => {
-            let _ = handle_key_player("U", self.config.player.address.as_str(), self.config.player.port.as_str(), &mut is_playback, self.username.as_str());
+            let _ = handle_key_player("U", &self.player, self.username.as_str());
         }
 
         // speed rate up
         KeyCode::Char('O') => {
-            let _ = handle_key_player("O", self.config.player.address.as_str(), self.config.player.port.as_str(), &mut is_playback, self.username.as_str()); 
+            let _ = handle_key_player("O", &self.player, self.username.as_str()); 
         }
 
         // speed rate down
         KeyCode::Char('I') => {
-            let _ = handle_key_player("I", self.config.player.address.as_str(), self.config.player.port.as_str(), &mut is_playback, self.username.as_str()); 
+            let _ = handle_key_player("I", &self.player, self.username.as_str()); 
         }
 
         // volume up
         KeyCode::Char('o') => {
-            let _ = handle_key_player("o", self.config.player.address.as_str(), self.config.player.port.as_str(), &mut is_playback, self.username.as_str()); 
+            let _ = handle_key_player("o", &self.player, self.username.as_str()); 
         }
 
         // volume down
         KeyCode::Char('i') => {
-            let _ = handle_key_player("i", self.config.player.address.as_str(), self.config.player.port.as_str(), &mut is_playback, self.username.as_str()); 
+            let _ = handle_key_player("i", &self.player, self.username.as_str()); 
         }
 
         // stop playback (shuts down VLC - not the app, see Q/Esc for that)
         KeyCode::Char('X') => {
-            let _ = handle_key_player("stop", self.config.player.address.as_str(), self.config.player.port.as_str(), &mut is_playback, self.username.as_str());
+            let _ = handle_key_player("stop", &self.player, self.username.as_str());
         }
 
         // show key bindings
@@ -2017,11 +1997,10 @@ pub fn handle_key(&mut self, key: KeyEvent) {
             let token = self.token.clone();
             let server_address = self.server_address.clone();
             let username = self.username.clone();
-            let player_address = self.config.player.address.clone();
-            let port = self.config.player.port.clone();
+            let player = self.player.clone();
 
             tokio::spawn(async move {
-                quit_app(token, server_address, username, player_address, port).await;
+                quit_app(token, server_address, username, player).await;
             });
 
         }
@@ -2100,8 +2079,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
 
             let token = self.token.clone();
             let refresh_token = self.refresh_token.clone();
-            let port = self.config.player.port.clone();
-            let address_player = self.config.player.address.clone();
+            let player = self.player.clone();
             let server_address = self.server_address.clone();
             let username = self.username.clone();
 
@@ -2161,10 +2139,6 @@ pub fn handle_key(&mut self, key: KeyEvent) {
             let selected_account = self.list_state_settings_account.selected();
             let selected_settings_library = self.list_state_settings_library.selected();
 
-            let start_vlc_program = self.start_vlc_program.clone();
-            let is_cvlc = self.is_cvlc.clone();
-            let is_cvlc_term = self.is_cvlc_term.clone();
-
             // Podcast Autoplay needs these to re-fetch the live "New & Unfinished"
             // queue on each transition rather than relying on a stale snapshot - see
             // handle_l_pod_home::next_autoplay_episode.
@@ -2181,9 +2155,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                         let ids_ep_cnt_list = self.ids_ep_cnt_list.clone();
 
                         tokio::spawn(async move {
-                            let _ = quit_vlc(address_player.as_str(), port.as_str());
-
-                            pkill_vlc();
+                            let _ = player.quit();
 
                             // wait to close/sync the previous session first - see
                             // wait_prev_session_finished for what a false return means
@@ -2197,13 +2169,9 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                                 refresh_token.as_ref(),
                                 &ids_cnt_list,
                                 selected_cnt_list,
-                                port,
-                                address_player,
+                                player,
                                 ids_ep_cnt_list,
                                 server_address,
-                                start_vlc_program,
-                                is_cvlc,
-                                is_cvlc_term,
                                 username,
                                 id_selected_lib,
                                 podcast_sort_newest_first,
@@ -2215,9 +2183,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
 
                         tokio::spawn(async move {
 
-                            let _ = quit_vlc(address_player.as_str(), port.as_str());
-
-                            pkill_vlc();
+                            let _ = player.quit();
 
                             // wait to close/sync the previous session first - see
                             // wait_prev_session_finished for what a false return means
@@ -2231,12 +2197,8 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                                 refresh_token.as_ref(),
                                 ids_cnt_list,
                                 selected_cnt_list,
-                                port,
-                                address_player,
+                                player,
                                 server_address,
-                                start_vlc_program,
-                                is_cvlc,
-                                is_cvlc_term,
                                 username,
                             ).await;
                             }
@@ -2339,9 +2301,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                         }} else {
 
                             tokio::spawn(async move {
-                                let _ = quit_vlc(address_player.as_str(), port.as_str());
-
-                                pkill_vlc();
+                                let _ = player.quit();
 
                                 // wait to close/sync the previous session first - see
                                 // wait_prev_session_finished for what a false return means
@@ -2355,12 +2315,8 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                                     refresh_token.as_ref(),
                                     ids_library,
                                     selected_library,
-                                    port,
-                                    address_player,
+                                    player,
                                     server_address,
-                                    start_vlc_program,
-                                    is_cvlc,
-                                    is_cvlc_term,
                                     username,
                                 ).await;
                                 }
@@ -2400,9 +2356,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                         }} else {
 
                             tokio::spawn(async move {
-                                let _ = quit_vlc(address_player.as_str(), port.as_str());
-
-                                pkill_vlc();
+                                let _ = player.quit();
 
                                 // wait to close/sync the previous session first - see
                                 // wait_prev_session_finished for what a false return means
@@ -2416,12 +2370,8 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                                     refresh_token.as_ref(),
                                     ids_search_book,
                                     selected_search_book,
-                                    port,
-                                    address_player,
+                                    player,
                                     server_address,
-                                    start_vlc_program,
-                                    is_cvlc,
-                                    is_cvlc_term,
                                     username,
                                 ).await;
                                 }
@@ -2438,9 +2388,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                                 let selected_pod_ep = self.list_state_pod_ep.selected();
 
                                 tokio::spawn(async move {
-                                    let _ = quit_vlc(address_player.as_str(), port.as_str());
-
-                                    pkill_vlc();
+                                    let _ = player.quit();
 
                                     // wait to close/sync the previous session first - see
                                     // wait_prev_session_finished for what a false return means
@@ -2454,13 +2402,9 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                                         refresh_token.as_ref(),
                                         &all_ids_pod_ep_search_clone[index],
                                         selected_pod_ep,
-                                        port,
-                                        address_player,
+                                        player,
                                         id_pod_clone.as_str(),
                                         server_address,
-                                        start_vlc_program,
-                                        is_cvlc,
-                                        is_cvlc_term,
                                         username,
                                     ).await;
                                     }
@@ -2474,9 +2418,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                                 let id_pod_clone = id_pod.clone();
                                 let selected_pod_ep = self.list_state_pod_ep.selected();
                                 tokio::spawn(async move {
-                                    let _ = quit_vlc(address_player.as_str(), port.as_str());
-
-                                    pkill_vlc();
+                                    let _ = player.quit();
 
                                     // wait to close/sync the previous session first - see
                                     // wait_prev_session_finished for what a false return means
@@ -2490,13 +2432,9 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                                         refresh_token.as_ref(),
                                         &all_ids_pod_ep_clone[index],
                                         selected_pod_ep,
-                                        port,
-                                        address_player,
+                                        player,
                                         id_pod_clone.as_str(),
                                         server_address,
-                                        start_vlc_program,
-                                        is_cvlc,
-                                        is_cvlc_term,
                                         username,
                                     ).await;
                                     }

@@ -1,93 +1,35 @@
-use std::io::{self};
+use std::io;
+use std::net::TcpStream;
 use vlc_rc::Client;
-use tokio::net::TcpStream;
 use std::process::Command;
 use std::str;
 use regex::Regex;
-use log::{info, warn, error};
+use log::{info, warn};
+use crate::player::backend::Snapshot;
 
-/// Polls VLC's RC connection once a second for the current playback position, for as
-/// long as `is_vlc_running` reports the port still open.
-pub async fn fetch_vlc_data(port: String, address: String) -> Result<Option<u32>, io::Error> {
-
-    loop {
-        if !is_vlc_running(port.clone(), address.clone()).await {
-            break Ok(None);
-        }
-
-        let mut player = match Client::connect(format!("{address}:{port}")) {
-            Ok(player) => player,
-            Err(e) => {
-                error!("[fetch_vlc_data] {e}");
-                // Unlike the "no data yet" path below, this had no sleep - a persistent
-                // handshake failure (port open but VLC not yet ready to talk RC) busy-
-                // looped this task at full CPU instead of backing off.
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                continue;
-            }
-        };
-        let seconds = match player.get_time() {
-            Ok(Some(value)) => Some(value),
-            Ok(None) => None,
-            Err(e) => {
-                eprintln!("Failed to fetch time from VLC: {e}");
-                error!("Failed to fetch time from VLC: {e}");
-                None
-            }
-        };
-
-        if let Some(sec) = seconds {
-            if sec > 0 {
-                return Ok(Some(sec));
-            }
-            info!("[is_vlc_running][check_seconds]: {sec:?}");
-        }
-
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+/// `None` once VLC's RC port is closed, ie. VLC isn't running.
+pub fn poll_vlc(address: &str, port: &str) -> Option<Snapshot> {
+    let endpoint = format!("{address}:{port}");
+    if TcpStream::connect(&endpoint).is_err() {
+        info!("[poll_vlc] VLC is not running (port {port} is closed).");
+        return None;
     }
 
-}
-
-pub async fn fetch_vlc_is_playing(port: String, address: String) -> Result<bool, String> {
-    let mut player = match Client::connect(format!("{address}:{port}")) {
-        Ok(player) => player,
+    let mut client = match Client::connect(&endpoint) {
+        Ok(client) => client,
         Err(e) => {
-            warn!("[fetch_vlc_is_playing] Failed to connect to VLC at port {port}: {e}");
-            return Err(format!("Failed to connect to VLC at port {port}: {e}"));
-        }};
-
-    let is_playing = match player.is_playing() {
-        Ok(true) => true,
-        // VLC is still open but playback reached the end of the track - distinct from
-        // the Err case below, where VLC itself is no longer running.
-        Ok(false) => false,
-        Err(e) => {
-            error!("Failed to check the play status of VLC: {e}");
-            return Err(format!("Failed to check the play status of VLC: {e}"))
+            warn!("[poll_vlc] RC port is open but not answering yet: {e}");
+            return Some(Snapshot::default());
         }
     };
-
-    Ok(is_playing)
+    let position = client.get_time().ok().flatten().filter(|&seconds| seconds > 0);
+    // `is_playing` drops to 0 once the track has ended while VLC itself stays open.
+    let is_at_end = matches!(client.is_playing(), Ok(false));
+    Some(Snapshot { position, is_at_end })
 }
 
-pub async fn is_vlc_running(port: String, address: String) -> bool {
-    if TcpStream::connect(format!("{address}:{port}")).await.is_ok() {
-        true
-    } else {
-        info!("[is_vlc_running] VLC is not running (port {port} is closed).");
-        false
-    }
-}
-
-pub async fn get_vlc_version() -> Result<String, io::Error> {
-
-    let command: &str = if cfg!(target_os = "macos") {
-        "/Applications/VLC.app/Contents/MacOS/VLC"
-    } else {
-        "vlc"
-    };
-
-    let output = Command::new(command)
+pub async fn get_vlc_version(program: &str) -> Result<String, io::Error> {
+    let output = Command::new(program)
         .arg("--version")
         .output()?;
 

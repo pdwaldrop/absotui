@@ -126,16 +126,14 @@ async fn main() -> Result<()> {
         let leftover_token = app.token.clone();
         let leftover_server = app.server_address.clone();
         let leftover_username = app.username.clone();
-        let leftover_addr = app.config.player.address.clone();
-        let leftover_port = app.config.player.port.clone();
+        let leftover_player = app.player.clone();
         tokio::spawn(async move {
             sync_session_from_database(
                 leftover_token,
                 leftover_server,
                 leftover_username,
                 "startup",
-                leftover_addr,
-                leftover_port,
+                &leftover_player,
             ).await;
         });
 

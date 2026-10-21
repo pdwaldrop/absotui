@@ -59,6 +59,8 @@ pub fn is_downloaded(username: &str, item_id: &str) -> bool {
         .is_some_and(|d| !d.tracks.is_empty() && d.tracks.iter().all(|t| std::path::Path::new(&t.local_path).exists()))
 }
 
+const DOWNLOAD_MEDIA_PLAYER: &str = "Absotui download";
+
 /// Downloads every audio file backing a book for offline playback, if not already
 /// downloaded - a book uploaded as separate per-chapter files gets one local file per
 /// server-side track, not just the first. Meant to be run in a background task, same
@@ -74,7 +76,7 @@ pub async fn download_book(token: String, item_id: String, title: String, author
         return Ok(());
     }
 
-    let info_item = post_start_playback_session_book(Some(&token), &item_id, server_address.clone()).await?;
+    let info_item = post_start_playback_session_book(DOWNLOAD_MEDIA_PLAYER, Some(&token), &item_id, server_address.clone()).await?;
     // info_item: [current_time, content_url, duration, id_session, title, subtitle, author, chapters_json, tracks_json]
     let duration = &info_item[2];
     let id_session = &info_item[3];
@@ -136,7 +138,7 @@ pub async fn download_episode(token: String, podcast_id: String, episode_id: Str
         return Ok(());
     }
 
-    let info_item = post_start_playback_session_pod(Some(&token), &podcast_id, &episode_id, server_address.clone()).await?;
+    let info_item = post_start_playback_session_pod(DOWNLOAD_MEDIA_PLAYER, Some(&token), &podcast_id, &episode_id, server_address.clone()).await?;
     // info_item: [current_time, content_url, duration, id_session, podcast_title, episode_title, author]
     let content_url = &info_item[1];
     let duration = &info_item[2];

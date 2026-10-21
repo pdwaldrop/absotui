@@ -3,6 +3,7 @@ use serde::Deserialize;
 use color_eyre::eyre::{Result, Report};
 use std::env;
 use std::path::PathBuf;
+use crate::player::backend::Backend;
 
 #[derive(Debug, Deserialize)]
 pub struct ConfigFile {
@@ -33,6 +34,8 @@ fn default_sso_callback_port() -> u16 {
 
 #[derive(Debug, Deserialize)]
 pub struct Player {
+    #[serde(default)]
+    pub backend: Backend,
     pub cvlc: String,
     pub cvlc_term: String,
     pub address: String,

@@ -1,5 +1,9 @@
 #### PLAYER OPTIONS ####
 [player]
+# Which player Absotui launches: "vlc" or "mpv".
+# The cvlc, cvlc_term, address and port options below only apply to VLC.
+backend = "vlc"
+
 # By default, Absotui integrated player is launched (works with cvlc, launched in background, the command line
 # version of vlc).
 # 0: No, 1: Yes

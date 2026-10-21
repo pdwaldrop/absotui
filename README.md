@@ -104,16 +104,18 @@ chmod +x absotui-x86_64.AppImage
 ./absotui-x86_64.AppImage
 ```
 
-Playback needs VLC (`cvlc`) installed on your system - the AppImage doesn't bundle it (the install script above installs it for you).
+Playback needs VLC (`cvlc`) or mpv installed on your system - the AppImage doesn't bundle either (the install script above installs VLC for you).  
+VLC is used by default.  
+To use `mpv` instead of VLC, set `backend = "mpv"` under `[player]` in `config.toml`.
 
 (aarch64 machines: swap in `absotui-aarch64.AppImage`.) It carries update information, so if you use AppImageUpdate or AppImageLauncher, they'll find new releases on their own. This is a separate, independent download from the install script above - either works, pick whichever fits how you manage apps.
 
 <details>
 <summary><h3>🔧 Install from source</h3></summary>
 
-**Requirements:** `Rust`, `VLC`
+**Requirements:** `Rust`, `VLC` (default) or `mpv` (set `backend = "mpv"` under `[player]` in `config.toml` to use mpv)
 
-<sub>Optional: the `cvlc_term` config setting (off by default) opens a terminal to control `cvlc` directly, which additionally needs the `kitty` terminal installed.</sub>
+<sub>Optional (VLC only): the `cvlc_term` config setting (off by default) opens a terminal to control `cvlc` directly, which additionally needs the `kitty` terminal installed.</sub>
 
 Note: `main` might be unstable — prefer `git clone --branch stable --single-branch https://github.com/pdwaldrop/absotui` if you want the last stable release.
 

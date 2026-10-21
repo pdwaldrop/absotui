@@ -1,14 +1,13 @@
-use crate::player::vlc::start_vlc::start_vlc;
-use crate::player::vlc::fetch_vlc_data::{fetch_vlc_data, fetch_vlc_is_playing};
+use crate::player::backend::Player;
+use crate::player::session::{PlayerSession, PlaybackStatus, Track, TrackSource};
 use crate::utils::pop_up_message::{clear_message, NEEDS_TERMINAL_CLEAR};
 use std::sync::atomic::Ordering;
 use crate::api::me::update_media_progress::{update_media_progress_pod, update_media_progress2_pod};
 use std::io::stdout;
-use log::{info, error};
-use crate::db::crud::{insert_listening_session, update_is_vlc_running, update_current_time, update_chapter, update_is_finished, update_is_loop_break, get_listening_session, delete_user, update_login_err};
+use log::info;
+use crate::db::crud::{insert_listening_session, update_is_vlc_running, update_current_time, update_is_finished, update_is_loop_break, get_listening_session, delete_user, update_login_err};
 use crate::api::server::refresh_token::{maybe_refresh_token, RefreshOutcome};
 use crate::db::database_struct::DownloadedItem;
-use crate::utils::vlc_tcp_stream::vlc_tcp_stream;
 
 /// Plays a downloaded podcast episode with no server session at all - used when
 /// `post_start_playback_session_pod` fails (server unreachable) but a local copy of the
@@ -24,10 +23,7 @@ pub async fn handle_pod_episode_offline(
     podcast_id: String,
     episode_id: String,
     downloaded: DownloadedItem,
-    port: String,
-    address_player: String,
-    program: String,
-    is_cvlc: String,
+    player: Player,
     username: String,
     mut token: String,
     mut refresh_token: String,
@@ -39,7 +35,7 @@ pub async fn handle_pod_episode_offline(
     // Resume from wherever local playback last left off, if the last real
     // `listening_session` row happens to be this same episode - the download itself
     // doesn't track a position.
-    let mut current_time: u32 = get_listening_session().ok().flatten()
+    let current_time: u32 = get_listening_session().ok().flatten()
         .filter(|s| s.id_pod == episode_id)
         .map(|s| s.current_time)
         .unwrap_or(0);
@@ -58,48 +54,24 @@ pub async fn handle_pod_episode_offline(
         String::new(),
     );
 
-    let port_clone = port.clone();
-    let address_player_clone = address_player.clone();
-    let username_clone = username.clone();
-    let podcast_id_clone = podcast_id.clone();
-    let local_file_path = downloaded.file_path.clone();
-    let title = downloaded.title.clone();
-    let current_time_str = current_time.to_string();
-
-    tokio::spawn(async move {
-        info!("[handle_pod_episode_offline][start_vlc] VLC launched against local file (offline)");
-        // id_session/track_index/server_address are unused whenever local_file_path is
-        // Some - see start_vlc's `source` resolution.
-        if let Err(e) = start_vlc(
-            &current_time_str,
-            &port_clone,
-            address_player_clone,
-            "",
-            0,
-            title.clone(),
-            title,
-            String::new(),
-            String::new(),
-            program,
-            is_cvlc,
-            username_clone,
-            podcast_id_clone,
-            Some(local_file_path),
-        ).await {
-            error!("[handle_pod_episode_offline][start_vlc] {e}");
-        }
-    });
+    let track = Track {
+        source: TrackSource::Local(downloaded.file_path.clone()),
+        start: current_time,
+        title: downloaded.title.clone(),
+        subtitle: downloaded.title.clone(),
+        author: String::new(),
+        id_item: podcast_id.clone(),
+    };
+    let mut session = PlayerSession::launch(player, username.clone(), track).await;
 
     let mut stdout = stdout();
     let _ = clear_message(&mut stdout, 3);
     NEEDS_TERMINAL_CLEAR.store(true, Ordering::Relaxed);
 
-    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-
     let _ = update_is_vlc_running("1", username.as_str());
 
-    // See handle_l_book.rs's got_real_data comment - same reasoning applies here.
-    let mut got_real_data = false;
+    // See handle_l_book.rs's last_position comment - same reasoning applies here.
+    let mut last_position: Option<u32> = None;
 
     loop {
         // Same proactive-refresh reasoning as handle_l_book_offline - this path is
@@ -109,64 +81,34 @@ pub async fn handle_pod_episode_offline(
         if maybe_refresh_token(&mut token, &mut refresh_token, username.as_str(), server_address.as_str()).await == RefreshOutcome::Failed {
             let _ = delete_user(username.as_str());
             let _ = update_login_err("Your session expired - restart Absotui to log in again");
-            let _ = crate::player::vlc::quit_vlc::quit_vlc(&address_player, &port);
-            crate::player::vlc::quit_vlc::pkill_vlc();
+            let _ = session.quit();
             let _ = update_is_vlc_running("0", username.as_str());
             let _ = update_is_loop_break("1", username.as_str());
             break;
         }
 
-        match fetch_vlc_data(port.clone(), address_player.clone()).await {
-            Ok(Some(data_fetched_from_vlc)) => {
-                got_real_data = true;
-                let _ = update_current_time(data_fetched_from_vlc, id_session.as_str());
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-
-                match vlc_tcp_stream(address_player.as_str(), port.as_str(), "chapter") {
-                    Ok(response) => {
-                        let _ = update_chapter(response.as_str(), id_session.as_str());
-                    }
-                    Err(e) => info!("[handle_pod_episode_offline] Error: {e}"),
-                }
-
-                match fetch_vlc_is_playing(port.clone(), address_player.clone()).await {
-                    Ok(true) => {
-                        current_time = data_fetched_from_vlc;
-                    }
-                    Ok(false) => {
-                        info!("[handle_pod_episode_offline][Finished] Track finished");
-                        let _ = update_is_finished("1", id_session.as_str());
-                        // Best-effort only - ignored whether the server is back or not.
-                        let _ = update_media_progress2_pod(&podcast_id, Some(&token), Some(data_fetched_from_vlc), &downloaded.duration, true, &episode_id, server_address.clone()).await;
-                        let _ = update_is_loop_break("1", username.as_str());
-                        let _ = update_is_vlc_running("0", username.as_str());
-                        break;
-                    }
-                    Err(_) => {
-                        let _ = update_is_vlc_running("0", username.as_str());
-                        info!("[handle_pod_episode_offline][Quit] Item {episode_id} closed at {data_fetched_from_vlc}s");
-                        let _ = update_media_progress_pod(&podcast_id, Some(&token), Some(data_fetched_from_vlc), &downloaded.duration, &episode_id, server_address.clone()).await;
-                        let _ = update_is_loop_break("1", username.as_str());
-                        break;
-                    }
-                }
+        match session.next_status().await {
+            PlaybackStatus::Playing(position) => {
+                last_position = Some(position);
+                let _ = update_current_time(position, id_session.as_str());
             }
-            Ok(None) => {
-                let _ = update_is_vlc_running("0", username.as_str());
-                if got_real_data {
-                    info!("[handle_pod_episode_offline][None] Item {episode_id} closed at {current_time}s");
-                    let _ = update_media_progress_pod(&podcast_id, Some(&token), Some(current_time), &downloaded.duration, &episode_id, server_address.clone()).await;
-                } else {
-                    info!("[handle_pod_episode_offline][None] Item {episode_id}: no real playback data was ever fetched, skipping progress sync");
-                }
+            PlaybackStatus::Finished => {
+                let position = last_position.unwrap_or(current_time);
+                info!("[handle_pod_episode_offline][Finished] Track finished");
+                let _ = update_is_finished("1", id_session.as_str());
+                // Best-effort only - ignored whether the server is back or not.
+                let _ = update_media_progress2_pod(&podcast_id, Some(&token), Some(position), &downloaded.duration, true, &episode_id, server_address.clone()).await;
                 let _ = update_is_loop_break("1", username.as_str());
+                let _ = update_is_vlc_running("0", username.as_str());
                 break;
             }
-            Err(e) => {
-                error!("[handle_pod_episode_offline][Err(e)]{e}");
+            PlaybackStatus::Closed => {
                 let _ = update_is_vlc_running("0", username.as_str());
-                if got_real_data {
-                    let _ = update_media_progress_pod(&podcast_id, Some(&token), Some(current_time), &downloaded.duration, &episode_id, server_address.clone()).await;
+                if let Some(position) = last_position {
+                    info!("[handle_pod_episode_offline][Quit] Item {episode_id} closed at {position}s");
+                    let _ = update_media_progress_pod(&podcast_id, Some(&token), Some(position), &downloaded.duration, &episode_id, server_address.clone()).await;
+                } else {
+                    info!("[handle_pod_episode_offline][Quit] Item {episode_id}: no real playback data was ever fetched, skipping progress sync");
                 }
                 let _ = update_is_loop_break("1", username.as_str());
                 break;

@@ -1,6 +1,5 @@
-use crate::player::vlc::start_vlc::start_vlc;
-use crate::player::vlc::fetch_vlc_data::{fetch_vlc_data, fetch_vlc_is_playing};
-use crate::player::vlc::exec_nc::exec_nc;
+use crate::player::backend::Player;
+use crate::player::session::{PlayerSession, PlaybackStatus, Track, TrackSource};
 use crate::api::me::update_media_progress::{update_media_progress_pod, update_media_progress2_pod};
 use crate::api::library_items::play_lib_item_or_pod::post_start_playback_session_pod;
 use crate::api::sessions::sync_open_session::sync_session;
@@ -9,10 +8,8 @@ use crate::utils::pop_up_message::{clear_message, NEEDS_TERMINAL_CLEAR};
 use std::sync::atomic::Ordering;
 use std::io::stdout;
 use log::{info, error};
-use crate::db::crud::{insert_listening_session, update_is_vlc_running, update_current_time, get_speed_rate, update_chapter, update_elapsed_time, update_is_finished, update_is_loop_break, get_is_podcast_autoplay, get_listening_session, get_download, delete_user, update_login_err};
+use crate::db::crud::{insert_listening_session, update_is_vlc_running, update_current_time, get_speed_rate, update_elapsed_time, update_is_finished, update_is_loop_break, get_is_podcast_autoplay, get_listening_session, get_download, delete_user, update_login_err};
 use crate::api::server::refresh_token::{maybe_refresh_token, RefreshOutcome};
-use crate::utils::vlc_tcp_stream::vlc_tcp_stream;
-use crate::player::vlc::quit_vlc::{pkill_vlc, quit_vlc};
 use crate::utils::convert_seconds::progress_time_diff;
 use crate::api::libraries::get_library_perso_view_pod::get_new_and_unfinished_pod;
 use crate::api::utils::collect_personalized_view_pod::{collect_ids_pod_cnt_list, collect_ids_ep_pod_cnt_list, collect_published_at_pod_cnt_list};
@@ -25,21 +22,15 @@ pub async fn handle_l_pod_home(
     refresh_token: Option<&String>,
     ids_library_items: &[String],
     selected: Option<usize>,
-    port: String,
-    address_player: String,
+    player: Player,
     id_pod: Vec<String>,
     server_address: String,
-    program: String,
-    is_cvlc: String,
-    is_cvlc_term: String,
     username: String,
     id_selected_lib: String,
     newest_first: bool,
     initial_published_at: Option<i64>,
 
 ) {
-
-    pkill_vlc();
 
     let Some(token) = token else { return; };
     // Owned and mutable so the proactive refresh check below (run once per loop
@@ -66,7 +57,7 @@ pub async fn handle_l_pod_home(
         // exists - see src/utils/download_cache.rs.
         let downloaded = get_download(&username, &id_pod_ep);
 
-        match post_start_playback_session_pod(Some(&token), &id, &id_pod_ep, server_address.clone()).await {
+        match post_start_playback_session_pod(&player.media_player_label().await, Some(&token), &id, &id_pod_ep, server_address.clone()).await {
         Err(e) => {
             if let Some(downloaded) = downloaded {
                 info!("[handle_l_pod_home] Couldn't start an online playback session ({e}) - falling back to the downloaded copy of {id_pod_ep}");
@@ -74,10 +65,7 @@ pub async fn handle_l_pod_home(
                     id.clone(),
                     id_pod_ep.clone(),
                     downloaded,
-                    port.clone(),
-                    address_player.clone(),
-                    program.clone(),
-                    is_cvlc.clone(),
+                    player.clone(),
                     username.clone(),
                     token.clone(),
                     refresh_token.clone(),
@@ -115,65 +103,35 @@ pub async fn handle_l_pod_home(
             );
 
 
-            // Cloned so these stay available after the move into the spawned task below.
-            let port_clone = port.clone();
-            let info_item_clone = info_item.clone() ;
-            let server_address_clone = server_address.clone() ;
-            let address_player_clone = address_player.clone() ;
-            let username_clone = username.clone();
-            let program_clone = program.clone();
-            let is_cvlc_clone = is_cvlc.clone();
-            let id_clone = id.clone();
             // downloaded episode, if any - play from the local copy instead of
             // streaming, even though the server was reachable enough to start this
             // session
-            let local_file_path = downloaded.map(|d| d.file_path);
+            let source = match downloaded {
+                Some(downloaded) => TrackSource::Local(downloaded.file_path),
+                None => TrackSource::Stream {
+                    server_address: server_address.clone(),
+                    id_session: info_item[3].clone(),
+                    track_index: info_item[7].parse().unwrap_or(0),
+                },
+            };
+            let track = Track {
+                source,
+                start: current_time,
+                title: info_item[4].clone(),
+                subtitle: info_item[5].clone(),
+                author: info_item[6].clone(),
+                id_item: id.clone(),
+            };
+            let mut session = PlayerSession::launch(player.clone(), username.clone(), track).await;
 
-            // Start VLC is launched in a spawn to allow fetch_vlc_data to start at the same time
-            tokio::spawn(async move {
-                // this info! is not the most reliable to know is VLC is really launched
-                info!("[handle_l_pod_home][start_vlc] VLC successfully launched");
-                if let Err(e) = start_vlc(
-                    &info_item_clone[0], // current_time
-                    &port_clone, // player port
-                    address_player_clone, // player address
-                    &info_item_clone[3], // id_session
-                    info_item_clone[7].parse().unwrap_or(0), // track_index
-                    info_item_clone[4].clone(), // title
-                    info_item_clone[5].clone(), // subtitle
-                    info_item_clone[6].clone(), // author
-                    server_address_clone.clone(), // server address
-                    program_clone,
-                    is_cvlc_clone,
-                    username_clone,
-                    id_clone,
-                    local_file_path,
-                ).await {
-                    error!("[handle_l_pod_home][start_vlc] {e}");
-                }
-            });
-
-            if is_cvlc_term == "1" {
-                let port_clone = port.clone();
-                let address_player_clone = address_player.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = exec_nc(&port_clone, address_player_clone).await {
-                        error!("[handle_l_pod_home][exec_nc] {e}");
-                    }
-                });
-            }
-
-            // clear loading message (from app.rs) when vlc is launched
+            // clear loading message (from app.rs) once the player is up
             let mut stdout = stdout();
             let _ = clear_message(&mut stdout, 3);
             NEEDS_TERMINAL_CLEAR.store(true, Ordering::Relaxed);
 
-
-            // Gives VLC time to accept the RC connection before polling it.
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            // Seeded to a value fetch_vlc_data's first real reading is very unlikely to
-            // land on exactly, so the first poll iteration doesn't get misread as "paused"
-            // by the data_fetched_from_vlc == last_current_time check below.
+            // Seeded to a value the first real position is very unlikely to land on
+            // exactly, so the first poll iteration doesn't get misread as "paused" by the
+            // position == last_current_time check below.
             let mut last_current_time: u32 = 3;
             let mut progress_sync: u32 = 3;
 
@@ -181,13 +139,11 @@ pub async fn handle_l_pod_home(
 
             let mut trigger = 1;
 
-            // Stays false until fetch_vlc_data first returns a real position - guards
-            // the Ok(None)/Err(e) cleanup arms below from syncing `current_time` (still
-            // whatever it was at session start) when VLC was launched and quit before
-            // ever reporting anything real: for an episode with no prior progress
-            // that's 0, and re-sending it as the "closed at" position reads as progress
-            // being wiped rather than "nothing was actually observed to sync."
-            let mut got_real_data = false;
+            // Position last reported by the player. Stays None if the player is closed
+            // before ever reporting one, so the "closed at" sync below doesn't send the
+            // session-start position back: for an episode with no prior progress that's
+            // 0, which reads as progress being wiped.
+            let mut last_position: Option<u32> = None;
 
             loop {
                 // Keeps this task's own copy of the token fresh independently of the
@@ -198,32 +154,30 @@ pub async fn handle_l_pod_home(
                     let _ = delete_user(username.as_str());
                     let _ = update_login_err("Your session expired - restart Absotui to log in again");
                     let _ = close_session_without_send_prg_data(Some(&token), &info_item[3], server_address.clone()).await;
-                    let _ = quit_vlc(&address_player, &port);
-                    pkill_vlc();
+                    let _ = session.quit();
                     let _ = update_is_vlc_running("0", username.as_str());
                     let _ = update_is_loop_break("1", username.as_str());
                     break 'episodes;
                 }
 
-                match fetch_vlc_data(port.clone(), address_player.clone()).await {
-                    Ok(Some(data_fetched_from_vlc)) => {
-                        got_real_data = true;
+                match session.next_status().await {
+                    PlaybackStatus::Playing(position) => {
+                        last_position = Some(position);
 
                         // Manually marked finished while still playing (F in the Home
-                        // list) - the key handler can't touch VLC directly (this task
-                        // owns it exclusively), so it just flips
+                        // list) - the key handler can't touch the player directly (this
+                        // task owns it exclusively), so it just flips
                         // listening_session.is_finished as a signal. Checked first,
                         // before the normal per-second bookkeeping below, so playback
                         // actually stops within about a second instead of waiting on
-                        // the next natural fetch_vlc_is_playing check below - unlike
-                        // that natural end-of-track case, VLC is still actively
-                        // playing here and has to be told to stop, not just detected
-                        // as already having done so.
-                        if let Ok(Some(session)) = get_listening_session()
-                            && session.is_finished {
+                        // the natural Finished status - unlike that natural
+                        // end-of-track case, the player is still actively playing here
+                        // and has to be told to stop, not just detected as already
+                        // having done so.
+                        if let Ok(Some(listening_session)) = get_listening_session()
+                            && listening_session.is_finished {
                                 info!("[handle_l_pod_home][ManualFinish] Marked finished while playing, stopping");
-                                let _ = quit_vlc(&address_player, &port);
-                                pkill_vlc();
+                                let _ = session.quit();
 
                                 // Report full duration as the current_time, not
                                 // wherever playback happened to be interrupted - the
@@ -232,7 +186,7 @@ pub async fn handle_l_pod_home(
                                 // at a partial percentage doesn't stick (matches the
                                 // not-currently-playing branch in app.rs's F handler,
                                 // which does the same for the same reason).
-                                let duration_secs = info_item[2].parse::<f64>().map(|d| d.round() as u32).unwrap_or(data_fetched_from_vlc);
+                                let duration_secs = info_item[2].parse::<f64>().map(|d| d.round() as u32).unwrap_or(position);
 
                                 let next_episode = finish_episode(
                                     &token,
@@ -250,7 +204,6 @@ pub async fn handle_l_pod_home(
 
                                 if let Some((next_id, next_id_pod, next_published_at)) = next_episode {
                                     info!("[handle_l_pod_home][ManualFinish] Autoplay is on, advancing to next episode");
-                                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                                     id = next_id;
                                     id_pod_ep = next_id_pod;
                                     current_published_at = Some(next_published_at);
@@ -260,18 +213,16 @@ pub async fn handle_l_pod_home(
                                 break 'episodes;
                         }
 
-                        let _ = update_current_time(data_fetched_from_vlc, info_item[3].as_str());
+                        let _ = update_current_time(position, info_item[3].as_str());
 
-                        // Paces this poll loop to once a second.
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        if data_fetched_from_vlc == last_current_time {
+                        if position == last_current_time {
                             progress_sync = 0; // the track is in pause
                         } else {
                             let speed_rate_str = get_speed_rate(username.as_str());
                             let speed_rate = speed_rate_str.parse::<f64>().unwrap_or(1.0);
                             let current_time_adjusted = f64::from(current_time) / speed_rate;
-                            let data_fetched_from_vlc_adjusted = f64::from(data_fetched_from_vlc) / speed_rate;
-                            let diff = progress_time_diff(data_fetched_from_vlc_adjusted, current_time_adjusted);
+                            let position_adjusted = f64::from(position) / speed_rate;
+                            let diff = progress_time_diff(position_adjusted, current_time_adjusted);
                             // A diff this large means a chapter/10s jump rather than normal
                             // playback advancing - clamp the sync amount to 1s instead of
                             // reporting the raw (inaccurate) jump size.
@@ -281,140 +232,98 @@ pub async fn handle_l_pod_home(
                                 progress_sync = diff;
                             }
                         }
-                        last_current_time = data_fetched_from_vlc;
+                        last_current_time = position;
 
-                        match vlc_tcp_stream(address_player.as_str(), port.as_str(), "chapter") {
-                            Ok(response) => {
-                                let _ = update_chapter(response.as_str(), info_item[3].as_str());
-                            }
-                            Err(e) => info!("Error: {e}"),
+                        // to sync progress in the server each 10 seconds
+                        if trigger == 10 {
+                            // /sync alone - it already updates progress server-side and triggers a
+                            // websocket update other clients pick up; calling /progress too on the
+                            // same tick risked a race (see known_bugs.md).
+                            let _ = sync_session(Some(&token), &info_item[3],Some(position), progress_sync, server_address.clone()).await;
+                            let _ = update_elapsed_time(progress_sync, info_item[3].as_str());
+
+                            current_time = position;
+                            progress_sync = 0;
+                            trigger = 0;
+
+                        } else if progress_sync != 0 {
+                            trigger += 1;
                         }
-
-
-                        match fetch_vlc_is_playing(port.clone(), address_player.clone()).await {
-                            Ok(true) => {
-                                // to sync progress in the server each 10 seconds
-                                if trigger == 10 {
-                                    // /sync alone - it already updates progress server-side and triggers a
-                                    // websocket update other clients pick up; calling /progress too on the
-                                    // same tick risked a race (see known_bugs.md).
-                                    let _ = sync_session(Some(&token), &info_item[3],Some(data_fetched_from_vlc), progress_sync, server_address.clone()).await;
-                                    let _ = update_elapsed_time(progress_sync, info_item[3].as_str());
-
-                                    current_time = data_fetched_from_vlc;
-                                    progress_sync = 0;
-                                    trigger = 0;
-
-                                } else if progress_sync != 0 {
-                                    trigger += 1;
-                                } else if progress_sync == 0 {
-                                    trigger += 0;
-                                }
-                            },
-                            // The track ended naturally but VLC is still open - distinct
-                            // from Err below, where the user closed VLC itself.
-                            Ok(false) => {
-                                info!("[handle_l_pod_home][Finished] Track finished");
-
-                                // Podcast Autoplay: if on, and the live "New & Unfinished"
-                                // queue has something adjacent to this episode to play next,
-                                // finish_episode returns it to start - otherwise stop here
-                                // just like before this feature existed.
-                                //
-                                // (finish_episode re-fetches the queue rather than just
-                                // advancing to the next index of the list this task started
-                                // with: that list is a one-time snapshot taken back when the
-                                // user first pressed play, and can be badly stale by the time
-                                // a later episode in an autoplay chain finishes - new episodes
-                                // arrive, others get marked finished and drop out, entirely
-                                // independent of this chain. Indexing into the stale snapshot
-                                // could "autoplay" into whatever used to be next in that old
-                                // ordering - including an episode already listened to earlier -
-                                // rather than what's actually next in the live queue.)
-                                let next_episode = finish_episode(
-                                    &token,
-                                    &id,
-                                    &id_pod_ep,
-                                    data_fetched_from_vlc,
-                                    &info_item[2],
-                                    info_item[3].as_str(),
-                                    username.as_str(),
-                                    &server_address,
-                                    &id_selected_lib,
-                                    newest_first,
-                                    current_published_at,
-                                ).await;
-
-                                if let Some((next_id, next_id_pod, next_published_at)) = next_episode {
-                                    info!("[handle_l_pod_home][Finished] Autoplay is on, advancing to next episode");
-                                    // Deliberately NOT setting is_loop_break here - this task
-                                    // is about to keep running for the next episode, not
-                                    // actually exit. `wait_prev_session_finished` (run before
-                                    // any fresh manual play) polls this exact flag to know
-                                    // this background task is done - setting it here on every
-                                    // mid-chain transition let it go stale, so a manual replay
-                                    // of the still-autoplaying episode would see a false "done"
-                                    // and spawn a second task racing this same one over VLC
-                                    // and the shared listening_session row.
-                                    //
-                                    // VLC doesn't exit on its own at end-of-track, it just
-                                    // goes idle - without explicitly quitting it here (same
-                                    // as every other place that starts new playback does),
-                                    // it keeps holding the RC port, the next episode's VLC
-                                    // can't bind it, and all control/sync ends up silently
-                                    // talking to this now-finished instance instead.
-                                    let _ = quit_vlc(&address_player, &port);
-                                    pkill_vlc();
-                                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                                    id = next_id;
-                                    id_pod_ep = next_id_pod;
-                                    current_published_at = Some(next_published_at);
-                                    continue 'episodes;
-                                }
-                                let _ = update_is_loop_break("1", username.as_str());
-                                break 'episodes;
-                            },
-                            // fetch_vlc_is_playing errors when VLC itself is no longer
-                            // running - the user closed it, rather than the track ending.
-                            Err(_e) => {
-                                let _ = update_is_vlc_running("0", username.as_str());
-                                info!("[handle_l_pod_home][Quit]");
-                                let _ = close_session_without_send_prg_data(Some(&token), &info_item[3],  server_address.clone()).await;
-                                info!("[handle_l_pod_home][Quit] Session successfully closed");
-                                let _ = update_media_progress_pod(&id, Some(&token), Some(data_fetched_from_vlc), &info_item[2], &id_pod_ep, server_address.clone()).await;
-                                info!("[handle_l_pod_home][Quit] VLC closed");
-                                info!("[handle_l_pod_home][Quit] Item {id_pod_ep} closed at {data_fetched_from_vlc}s");
-
-                                let _ = update_is_loop_break("1", username.as_str());
-                                break 'episodes;
-                            }
-                        }
-
                     }
-                    // VLC was launched and quit before ever reporting a position.
-                    Ok(None) => {
-                        let _ = update_is_vlc_running("0", username.as_str());
-                        info!("[handle_l_pod_home][None]");
-                        let _ = close_session_without_send_prg_data(Some(&token), &info_item[3],  server_address.clone()).await;
-                        info!("[handle_l_pod_home][None] Session successfully closed");
-                        if got_real_data {
-                            let _ = update_media_progress_pod(&id, Some(&token), Some(current_time), &info_item[2], &id_pod_ep, server_address.clone()).await;
-                            info!("[handle_l_pod_home][None] VLC closed");
-                            info!("[handle_l_pod_home][None] Item {id} closed at {current_time}s");
-                        } else {
-                            info!("[handle_l_pod_home][None] VLC closed - no real playback data was ever fetched, skipping progress sync");
-                        }
+                    // The track ended naturally but the player is still open - distinct
+                    // from Closed below, where the user closed the player itself.
+                    PlaybackStatus::Finished => {
+                        info!("[handle_l_pod_home][Finished] Track finished");
 
+                        // Podcast Autoplay: if on, and the live "New & Unfinished"
+                        // queue has something adjacent to this episode to play next,
+                        // finish_episode returns it to start - otherwise stop here
+                        // just like before this feature existed.
+                        //
+                        // (finish_episode re-fetches the queue rather than just
+                        // advancing to the next index of the list this task started
+                        // with: that list is a one-time snapshot taken back when the
+                        // user first pressed play, and can be badly stale by the time
+                        // a later episode in an autoplay chain finishes - new episodes
+                        // arrive, others get marked finished and drop out, entirely
+                        // independent of this chain. Indexing into the stale snapshot
+                        // could "autoplay" into whatever used to be next in that old
+                        // ordering - including an episode already listened to earlier -
+                        // rather than what's actually next in the live queue.)
+                        let next_episode = finish_episode(
+                            &token,
+                            &id,
+                            &id_pod_ep,
+                            last_position.unwrap_or(current_time),
+                            &info_item[2],
+                            info_item[3].as_str(),
+                            username.as_str(),
+                            &server_address,
+                            &id_selected_lib,
+                            newest_first,
+                            current_published_at,
+                        ).await;
+
+                        if let Some((next_id, next_id_pod, next_published_at)) = next_episode {
+                            info!("[handle_l_pod_home][Finished] Autoplay is on, advancing to next episode");
+                            // Deliberately NOT setting is_loop_break here - this task
+                            // is about to keep running for the next episode, not
+                            // actually exit. `wait_prev_session_finished` (run before
+                            // any fresh manual play) polls this exact flag to know
+                            // this background task is done - setting it here on every
+                            // mid-chain transition let it go stale, so a manual replay
+                            // of the still-autoplaying episode would see a false "done"
+                            // and spawn a second task racing this same one over the
+                            // player and the shared listening_session row.
+                            //
+                            // The player doesn't exit on its own at end-of-track, it
+                            // just goes idle - without explicitly quitting it here (same
+                            // as every other place that starts new playback does), it
+                            // keeps holding its control port/socket, and all
+                            // control/sync ends up silently talking to this
+                            // now-finished instance instead.
+                            let _ = session.quit();
+                            id = next_id;
+                            id_pod_ep = next_id_pod;
+                            current_published_at = Some(next_published_at);
+                            continue 'episodes;
+                        }
                         let _ = update_is_loop_break("1", username.as_str());
                         break 'episodes;
                     }
-                    Err(e) => {
-                        error!("[handle_l_pod_home][Err(e)]{e}");
+                    PlaybackStatus::Closed => {
                         let _ = update_is_vlc_running("0", username.as_str());
+                        info!("[handle_l_pod_home][Quit]");
                         let _ = close_session_without_send_prg_data(Some(&token), &info_item[3],  server_address.clone()).await;
-                        if got_real_data {
-                            let _ = update_media_progress_pod(&id, Some(&token), Some(current_time), &info_item[2], &id_pod_ep, server_address.clone()).await;
+                        info!("[handle_l_pod_home][Quit] Session successfully closed");
+                        if let Some(position) = last_position {
+                            let _ = update_media_progress_pod(&id, Some(&token), Some(position), &info_item[2], &id_pod_ep, server_address.clone()).await;
+                            info!("[handle_l_pod_home][Quit] Player closed");
+                            info!("[handle_l_pod_home][Quit] Item {id_pod_ep} closed at {position}s");
+                        } else {
+                            info!("[handle_l_pod_home][Quit] Player closed - no real playback data was ever fetched, skipping progress sync");
                         }
+
                         let _ = update_is_loop_break("1", username.as_str());
                         break 'episodes;
                     }
@@ -427,11 +336,11 @@ pub async fn handle_l_pod_home(
 
 /// Marks the episode finished server-side, closes its session, and updates
 /// is_vlc_running - the common tail shared by the natural end-of-track path
-/// (`fetch_vlc_is_playing` returning `Ok(false)`) and a manual "mark finished while
-/// still playing" request (F in the Home list, signaled via
-/// listening_session.is_finished and caught at the top of the polling loop) - the two
-/// differ only in whether VLC itself has already stopped or the caller had to tell it
-/// to first, which happens before this runs either way.
+/// (`PlaybackStatus::Finished`) and a manual "mark finished while still playing"
+/// request (F in the Home list, signaled via listening_session.is_finished and caught
+/// at the top of the polling loop) - the two differ only in whether the player itself
+/// has already stopped or the caller had to tell it to first, which happens before
+/// this runs either way.
 ///
 /// Returns what to autoplay next (podcast id, episode id, published_at) if Podcast
 /// Autoplay is on and the live "New & Unfinished" queue has something adjacent to
@@ -441,7 +350,7 @@ async fn finish_episode(
     token: &String,
     id: &str,
     id_pod_ep: &str,
-    data_fetched_from_vlc: u32,
+    position: u32,
     duration: &str,
     id_session: &str,
     username: &str,
@@ -455,8 +364,8 @@ async fn finish_episode(
     let _ = close_session_without_send_prg_data(Some(token), id_session, server_address.to_string()).await;
     info!("[handle_l_pod_home][Finished] Session successfully closed");
 
-    let _ = update_media_progress2_pod(id, Some(token), Some(data_fetched_from_vlc), duration, true, id_pod_ep, server_address.to_string()).await;
-    info!("[handle_l_pod_home][Finished] Item {id_pod_ep} closed at {data_fetched_from_vlc}s");
+    let _ = update_media_progress2_pod(id, Some(token), Some(position), duration, true, id_pod_ep, server_address.to_string()).await;
+    info!("[handle_l_pod_home][Finished] Item {id_pod_ep} closed at {position}s");
 
     let _ = update_is_vlc_running("0", username);
 

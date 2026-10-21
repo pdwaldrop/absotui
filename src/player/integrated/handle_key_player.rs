@@ -1,9 +1,7 @@
-use std::io::{self, Write};
-use std::net::TcpStream;
+use std::io;
+use crate::player::backend::Player;
 use crate::db::crud::{get_listening_session, update_is_playback, update_speed_rate, get_speed_rate, update_volume_up, update_volume_down, get_is_per_item_speed, get_item_speed_rate, set_item_speed_rate, update_item_speed_rate, update_pending_seek};
 use crate::api::libraries::get_library_perso_view_pod::Chapter;
-use std::thread;
-use std::time::Duration;
 
 // Index of the chapter containing book-wide `time` (seconds) - same rule as
 // find_current_chapter (player_info.rs), just returning a position rather than a
@@ -16,10 +14,12 @@ fn current_chapter_idx(chapters: &[Chapter], time: f64) -> Option<usize> {
     })
 }
 
-pub fn handle_key_player(key: &str, address: &str, port: &str, is_playback: &mut bool, username: &str) -> io::Result<()> {
-    let mut stream = TcpStream::connect(format!("{address}:{port}"))?;
+pub fn handle_key_player(key: &str, player: &Player, username: &str) -> io::Result<()> {
+    if !player.is_reachable() {
+        return Err(io::Error::new(io::ErrorKind::NotConnected, "the player is not running"));
+    }
 
-    let jump = "10";
+    let jump = 10;
 
     match key {
         // toggle playback/pause
@@ -39,38 +39,16 @@ pub fn handle_key_player(key: &str, address: &str, port: &str, is_playback: &mut
 
                 }
             }
-            if *is_playback {
-                writeln!(stream, "pause")?;
-            } else {
-                writeln!(stream, "play")?;
-            }
-            *is_playback = !*is_playback;
+            player.toggle_pause()?;
         }
-
-        // For some cmd, below, need pause => cmd => play
-        // Allow vlc buffer issue. 
-        // Futhermore, need a thread for macos otherwise vlc buffer issue
-        // Otherwise buffer issue and the player freeze
-        // But maybe it's not necessary because I test absotui on macos with a VM
-        // and maybe the VM add a little delay.. but for now I try like this
 
         // jump forward
         "p" => {
-            writeln!(stream, "pause")?; 
-            writeln!(stream, "seek +{jump}")?;
-            if cfg!(target_os = "macos") {
-            thread::sleep(Duration::from_millis(500));
-            }
-            writeln!(stream, "play")?;
+            player.seek_relative(jump)?;
         }
         // jump backward
         "u" => {
-            writeln!(stream, "pause")?;
-            writeln!(stream, "seek -{jump}")?;
-            if cfg!(target_os = "macos") {
-            thread::sleep(Duration::from_millis(500));
-            }
-            writeln!(stream, "play")?;
+            player.seek_relative(-jump)?;
         }
         // next chapter - resolved from Absotui's own chapters[] data (via pending_seek,
         // see update_pending_seek's doc comment) rather than VLC's native chapter_n,
@@ -102,28 +80,28 @@ pub fn handle_key_player(key: &str, address: &str, port: &str, is_playback: &mut
             if let Ok(Some(session)) = get_listening_session() {
                 let _ = update_volume_up(session.id_session.as_str());
             }
-            writeln!(stream, "volup")?;
+            player.change_volume(true)?;
         }
         // volume down
         "i" => {
             if let Ok(Some(session)) = get_listening_session() {
                 let _ = update_volume_down(session.id_session.as_str());
             }
-            writeln!(stream, "voldown")?;
+            player.change_volume(false)?;
         }
         // speed rate up
         "O" => {
             let speed_rate = adjust_speed_rate(username, true);
-            writeln!(stream, "rate {speed_rate}")?;
+            player.set_speed(&speed_rate)?;
         }
         // speed rate down
         "I" => {
             let speed_rate = adjust_speed_rate(username, false);
-            writeln!(stream, "rate {speed_rate}")?;
+            player.set_speed(&speed_rate)?;
         }
-        // stop playback - shuts down VLC itself, not the app
+        // stop playback - shuts down the player itself, not the app
         "stop" => {
-            writeln!(stream, "shutdown")?;
+            player.quit()?;
         }
         _ => {}
     }
@@ -133,7 +111,7 @@ pub fn handle_key_player(key: &str, address: &str, port: &str, is_playback: &mut
 
 // Adjusts and returns the effective speed rate: per-item (keyed by the active
 // session's id_item) if Settings > Per-Item Speed is on, otherwise the single shared
-// speed_rate - same resolution start_vlc uses when launching a new session. Seeds the
+// speed_rate - same resolution Player::start uses when launching a new session. Seeds the
 // item's row at a fixed 1.0x baseline on first touch (not the current global rate -
 // see update_is_per_item_speed/resolve_speed_rate), whether that's because this is the
 // item's first playback under per-item mode, or because per-item mode was just turned
@@ -151,19 +129,5 @@ fn adjust_speed_rate(username: &str, is_up: bool) -> String {
     }
     let _ = update_speed_rate(username, is_up);
     get_speed_rate(username)
-}
-
-// Seeks the currently-playing VLC session directly to an absolute position (in seconds) -
-// used to jump to a specific chapter's start time. Bracketed by pause/play like the
-// relative seeks above, to avoid the same VLC buffering issue.
-pub fn seek_to_absolute_time(address: &str, port: &str, seconds: u32) -> io::Result<()> {
-    let mut stream = TcpStream::connect(format!("{address}:{port}"))?;
-    writeln!(stream, "pause")?;
-    writeln!(stream, "seek {seconds}")?;
-    if cfg!(target_os = "macos") {
-        thread::sleep(Duration::from_millis(500));
-    }
-    writeln!(stream, "play")?;
-    Ok(())
 }
 

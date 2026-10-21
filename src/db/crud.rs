@@ -474,27 +474,6 @@ pub fn insert_listening_session(
     Ok(())
 }
 
-pub fn update_chapter(value: &str, id_session: &str) -> Result<()> {
-
-    let db_path = default_db_path();
-
-    let err_message = "Error connecting to the database.";
-
-    if let Ok(conn) = Connection::open(db_path) {
-
-        conn.execute(
-            "UPDATE listening_session SET chapter = ?1 WHERE id_session = ?2",
-            params![value, id_session],
-        )?;
-    } else {
-        let mut stdout = stdout();
-        let _ = pop_message(&mut stdout, 3, err_message);
-        error!("[update_chapter] {err_message}");
-    }
-
-    Ok(())
-}
-
 // Update pending_seek (for `listening_session` table) - a book-wide seconds value
 // requested by the UI (chapter list jump, P/U next/prev chapter), consumed and cleared
 // by the playback loop that owns the running VLC process (see handle_l_book.rs), since

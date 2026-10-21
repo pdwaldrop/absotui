@@ -17,15 +17,10 @@ pub fn quit_vlc(address: &str, port: &str) -> io::Result<()> {
 // impossible to launch another track in the same session.
 pub fn pkill_vlc() {
     if cfg!(target_os = "macos") {  
-        let status = Command::new("pkill")
-            .arg("VLC")
-            .status()
-            .expect("Failed to execute pkill");
-
-        if status.success() {
-            info!("VLC pkill success");
-        } else {
-            error!("VLC pkill error");
+        match Command::new("pkill").arg("VLC").status() {
+            Ok(status) if status.success() => info!("VLC pkill success"),
+            Ok(_) => error!("VLC pkill error"),
+            Err(e) => error!("[pkill_vlc] Failed to execute pkill: {e}"),
         }
     } 
 }

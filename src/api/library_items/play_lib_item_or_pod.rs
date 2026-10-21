@@ -4,7 +4,6 @@ use reqwest::header::AUTHORIZATION;
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use serde_json::json;
-use crate::player::vlc::fetch_vlc_data::get_vlc_version;
 use crate::api::libraries::get_library_perso_view_pod::Chapter;
 
 
@@ -51,22 +50,15 @@ pub fn find_track_index(tracks: &[AudioTrack], time: f64) -> usize {
 /// Play a Library Item or Podcast Episode
 /// This endpoint starts a playback session for a library item or podcast episode.
 /// <https://api.audiobookshelf.org/#play-a-library-item-or-podcast-episode>
-pub async fn post_start_playback_session_book(token: Option<&String>, id_library_item: &str, server_address: String) -> Result<Vec<String>, reqwest::Error> {
-    let mut vlc_version = String::new();
-    match get_vlc_version().await {
-        Ok(version) => {vlc_version = version;}
-        Err(e) => {
-            log::error!("[get_vlc_version] {e}");
-        }
-    }
+pub async fn post_start_playback_session_book(media_player: &str, token: Option<&String>, id_library_item: &str, server_address: String) -> Result<Vec<String>, reqwest::Error> {
     let client = api_client();
 
     let params = json!({
-        // Streams the original file (eg. .m4b) directly with VLC, rather than
+        // Streams the original file (eg. .m4b) directly to the player, rather than
         // transcoding to .m3u8, so chapters/cover art stay intact and there's no added
         // transcoding latency.
         "forceDirectPlay": true,
-        "mediaPlayer": format!("VLC v{}", vlc_version),
+        "mediaPlayer": media_player,
         "deviceInfo": {
             "clientName": "Absotui",
             "clientVersion": format!("v{}", VERSION),
@@ -136,19 +128,15 @@ pub async fn post_start_playback_session_book(token: Option<&String>, id_library
 
     Ok(info_item)
 }
-pub async fn post_start_playback_session_pod(token: Option<&String>, id_library_item: &str, pod_ep_id: &str, server_address: String) -> Result<Vec<String>, reqwest::Error> {
-    let mut vlc_version = String::new();
-    if let Ok(version) = get_vlc_version().await {
-        vlc_version = version;
-    }
+pub async fn post_start_playback_session_pod(media_player: &str, token: Option<&String>, id_library_item: &str, pod_ep_id: &str, server_address: String) -> Result<Vec<String>, reqwest::Error> {
     let client = api_client();
 
     let params = json!({
-        // Streams the original file directly with VLC, rather than transcoding to
+        // Streams the original file directly to the player, rather than transcoding to
         // .m3u8, so chapters/cover art stay intact and there's no added transcoding
         // latency.
         "forceDirectPlay": true,
-        "mediaPlayer": format!("VLC v{}", vlc_version),
+        "mediaPlayer": media_player,
         "deviceInfo": {
             "clientName": "Absotui",
             "clientVersion": format!("v{}", VERSION),
