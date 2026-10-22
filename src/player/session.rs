@@ -7,6 +7,7 @@ use tokio::time::{sleep, sleep_until, Instant};
 use crate::player::backend::Player;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
+const LOADING_POLL_INTERVAL: Duration = Duration::from_millis(150);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const REACHABILITY_CHECK_INTERVAL: Duration = Duration::from_millis(100);
@@ -90,7 +91,7 @@ impl PlayerSession {
                 self.has_track_started = true;
                 return PlaybackStatus::Playing(position);
             }
-            sleep(POLL_INTERVAL).await;
+            sleep(LOADING_POLL_INTERVAL).await;
         }
     }
 

@@ -19,6 +19,8 @@ const API_TIMEOUT: Duration = Duration::from_secs(60);
 // promptly rather than sitting on the full request budget.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
+const DOWNLOAD_STALL_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// Client for ordinary API calls - JSON endpoints, cover images, ranged metadata reads.
 /// Everything with a bounded, small response body.
 ///
@@ -37,10 +39,12 @@ pub fn api_client() -> Client {
 /// minutes on a large audiobook or a slow connection - a total-duration cap would abort
 /// exactly the transfers it's meant to protect. Only the connect phase is bounded, so an
 /// unreachable server still fails fast while a working-but-slow transfer runs to
-/// completion.
+/// completion. The per-read limit only trips when data stops arriving altogether, so a
+/// stalled transfer fails (and resumes later) instead of hanging the download worker.
 pub fn download_client() -> Client {
     Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(DOWNLOAD_STALL_TIMEOUT)
         .build()
         .unwrap_or_else(|_| Client::new())
 }

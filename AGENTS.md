@@ -590,3 +590,104 @@ behaviour is exactly as before); Fedora/macOS.
 but other things on that machine will keep drifting. The existing `RefreshOutcome::Failed`
 path still deletes the local account on ANY non-success refresh response (including a 5xx
 from a proxy) - separate pre-existing risk, not changed here.
+
+### 2026-10-21 — Claude Code (performance check of v0.11.2, no code changes)
+
+**What changed:** Nothing in the repo - Paul asked whether recent updates had hurt
+speed, so this was measurement only. Answer: no. Startup, memory (~21 MB), idle CPU
+and key response are the same on v0.9.5, v0.10.0 and v0.11.2. What it did find are
+long-standing costs, ranked by value:
+1. *Auto Download repeats itself and buffers whole files in RAM.* The podcast version
+   is re-started on every ~8 s home refresh with no "already running" check, so the same
+   episodes download again and again (Paul's real log: 896 finished downloads of only 132
+   different episodes, about 64 GB moved for 7.6 GB of actual need; roughly a third of
+   attempts fail and restart from zero). Each download is held fully in memory first
+   (a 60 MB file peaks near 400 MB of RAM). Same behavior on v0.9.5 and v0.11.2; the code
+   dates from late July.
+2. *The main loop sleeps a fixed 50 ms between handling a key and drawing it.* Removing
+   it (prototype): key to screen 58 -> 13 ms, and 30 queued keys go from 8-10 to ~35 per
+   second.
+3. *Playback start looks slow because the UI checks the player once a second while it
+   loads.* VLC starts fetching audio ~0.2 s after the key, but the player bar only shows
+   a moving position at ~2.5 s. A 150 ms check while loading (one line in
+   `src/player/session.rs`, prototype) brings that to ~1.45 s.
+4. The podcast home refresh runs inside the draw loop (~0.6 s input freeze every ~8.7 s on
+   a 110 ms server) and logs one INFO line per episode each time (the 50 MB log is 88% that).
+5. A new `reqwest` client is built for every request (33 places); sharing one would save
+   a connection handshake each time.
+6. Smaller: new covers appear ~375 ms after selecting (the loop only notices a finished
+   fetch on its next 200 ms tick); very large cover images (>1400 px) stall the UI while
+   decoding (Paul's own covers are all under 42 KB, so not an issue for him).
+
+**How it was verified:** Against a fake Audiobookshelf on 127.0.0.1 with a scratch config
+(Paul's real server, config and listening session were not touched; the only real-data read
+was a listing of his cover cache sizes and his existing log). Release binaries of the three
+versions were checksum-verified and compared in alternating runs. Timing used a bare
+pseudo-terminal that answers the terminal-capability query the way Ghostty does. The fixed
+50 ms sleep and the 1 s poll were prototyped in a throwaway worktree (since deleted) and
+re-measured; nothing was committed. The machine is busy and on a power-saving CPU setting,
+so absolute milliseconds are inflated - only same-moment comparisons are trusted.
+
+**Not verified:** Behavior against Paul's real server and real terminal; macOS; mpv (VLC
+only); the Auto Download fix itself (only the problem was measured). An early reading in
+this session (startup ~2.4 s, first keypress ignored) was a test-setup artifact: a terminal
+that never answers the image query makes `Picker::from_query_stdio` wait its full 2 s and
+leaves a reader thread that swallows the next keypress. On a normal terminal the first
+screen takes ~0.4 s. That same thing can happen to real users in terminals that don't answer
+(e.g. tmux without passthrough) - a shorter query timeout would help them.
+
+**Open questions / handoff:** Waiting on Paul to choose what to fix. Suggested order:
+Auto Download (1), then the loop sleep (2) and loading poll (3), which are one-line changes.
+Any fix needs the usual live test before push; re-measure with a pty harness, not a
+detached tmux session.
+
+### 2026-10-22 — Claude Code (fixes for the 2026-10-21 performance findings 1-3)
+
+**What changed:** Paul asked for items 1, 2 and 3 from the entry above. All
+uncommitted, waiting on his go-ahead.
+1. *Auto Download* (`src/utils/download_cache.rs`, `src/utils/http_client.rs`):
+   each item can only download once at a time (so the `d` key and auto sync can't
+   collide); auto sync is now one worker per kind (books, podcasts) that always runs
+   the newest list instead of stacking overlapping passes; an auto-download that fails
+   is not retried for 2 minutes; files stream to `<id>.part` on disk and are renamed
+   into place only when complete (memory stays flat), and a leftover `.part` is resumed
+   with a Range request (a server that ignores Range just restarts cleanly); a 60 s
+   "no data arriving" limit on download connections so a stuck transfer errors out
+   instead of hanging the worker; `.part` files untouched for 3 days are deleted. Side
+   effect: a non-success HTTP status (e.g. 404) is now a failed download - before, the
+   error page could be saved as the audio file.
+2. *Main loop* (`src/main.rs`): removed the fixed 50 ms sleep, and the idle wait went from
+   200 to 250 ms so an idle app redraws exactly as often as before.
+3. *Player loading* (`src/player/session.rs`): while a track is still opening, the player
+   is checked every 150 ms instead of every second.
+
+**How it was verified:** `cargo build`, `cargo test` (100 passed: 96 plus 4 new for Range
+parsing, the in-flight guard, the retry cooldown and the one-worker behavior) and
+`cargo clippy --all-targets` (only the 5 existing `too_many_arguments` warnings, none in
+touched files). A unit test caught a real deadlock in my first version of the in-flight
+guard (`Option::then_some` built the guard eagerly and its `Drop` re-locked the same
+mutex) - fixed before anything else ran. Live, against a fake Audiobookshelf with a scratch
+config (Paul's server/config/session untouched), old v0.11.2 vs new build, every downloaded
+file checked byte for byte:
+- 75 s podcast Auto Download: old 18 downloads / 1,080 MB sent for 9 files, memory peak
+  325 MB; new 9 downloads / 540 MB, memory peak 32 MB.
+- Books, two 150 MB files: memory peak 202 MB old vs 26 MB new.
+- Dropped connection: retry after the cooldown sent `Range: bytes=20971520-` and got the
+  remaining 40 MB (206); server that ignores Range: clean full restart; stalled transfer:
+  errored out after about a minute and then resumed from the stall point.
+- Key to screen: 65 -> 13 ms median. 30 queued keys: old 3.5-6.8 keys/s, new about 10.7
+  (same-moment alternating runs; the laptop was on battery at 800 MHz, so absolute numbers
+  are low, an earlier run at 1.6 GHz showed about 35 keys/s for the same change).
+- Play start (key to a moving position on screen): 2.55 s -> 1.78 s on this machine.
+- Idle CPU and memory: unchanged (4.9-5.1% vs 4.9%, 22 MB), after the 250 ms wait fix (a
+  200 ms wait had made idle CPU about 25% higher).
+
+**Not verified:** Paul's real server and terminal; macOS; mpv (VLC only); a real server
+dropping connections mid-download (only the fake); the stall limit with a very slow but
+steady link (60 s without any data is the cutoff, which should not trip a slow transfer).
+Multi-track books still re-download tracks that already finished if a later track fails
+(unchanged, noted only). No changelog entry yet - that belongs to the release.
+
+**Open questions / handoff:** Needs Paul's go-ahead to commit and push; suggest a patch
+release after the usual live check on his own setup. Remaining ideas from the earlier entry
+(inline podcast refresh, shared HTTP client, event-driven wakeups) are untouched.

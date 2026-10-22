@@ -262,7 +262,7 @@ async fn main() -> Result<()> {
                 }
             }
 
-            if crossterm::event::poll(Duration::from_millis(200))?
+            if crossterm::event::poll(Duration::from_millis(250))?
                 && let event::Event::Key(key) = crossterm::event::read()? {
                     app.handle_key(key);
                     // 'R' just arms the same library_needs_reload flag a Settings >
@@ -312,7 +312,6 @@ async fn main() -> Result<()> {
                 let _ = terminal.clear();
             }
 
-            tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
 
