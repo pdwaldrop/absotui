@@ -190,9 +190,10 @@ async fn main() -> Result<()> {
             })?;
 
             // Keeps the podcast "New & Unfinished" list from going stale without
-            // requiring a manual refresh - the method itself no-ops unless enough time
-            // has passed, so this is cheap to call every loop iteration.
-            let _ = app.refresh_podcast_home_if_stale().await;
+            // requiring a manual refresh. The fetch runs in a background task (it takes
+            // a request per episode); both calls are cheap no-ops most iterations.
+            app.poll_podcast_home_refresh();
+            app.refresh_podcast_home_if_stale();
 
             // Keeps the access token from ever reaching Audiobookshelf's ~1 hour
             // default expiry while the app is open and in use - see

@@ -6,7 +6,10 @@ use serde::Deserialize;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use log::{info, warn, error};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -33,6 +36,16 @@ const REFRESH_MARGIN_SECS: i64 = 10 * 60;
 // a computer whose clock is off, a token the server already rejects looks valid locally
 // and never gets refreshed.
 static CLOCK_OFFSET_SECS: AtomicI64 = AtomicI64::new(0);
+
+// After a refresh fails for a reason that doesn't kill the token (server down, 5xx),
+// don't ask again for this long - the loop ticks several times a second and would
+// otherwise hammer a server that is already struggling. Keyed by server address.
+const TRANSIENT_RETRY_AFTER: Duration = Duration::from_secs(15);
+static TRANSIENT_FAILURES: LazyLock<Mutex<HashMap<String, Instant>>> = LazyLock::new(Default::default);
+
+fn transient_failures() -> std::sync::MutexGuard<'static, HashMap<String, Instant>> {
+    TRANSIENT_FAILURES.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 // Below this a difference is just noise; above it the error screen says so.
 const CLOCK_SKEW_NOTE_SECS: i64 = 120;
@@ -94,8 +107,8 @@ pub fn clock_skew_note() -> Option<String> {
 /// only remains valid for a short grace period - so callers must persist the returned
 /// refresh token, not just the access token.
 /// Distinguishes "the server was reached and explicitly rejected the refresh token"
-/// from any other failure (network unreachable, timeout, malformed response) - only
-/// this one means the refresh token itself is actually dead. `maybe_refresh_token`
+/// from any other failure (network unreachable, timeout, malformed response, a
+/// proxy's 5xx/429) - only this one means the refresh token itself is actually dead. `maybe_refresh_token`
 /// downcasts to this to decide between `RefreshOutcome::Failed` (delete-the-account
 /// worthy) and `RefreshOutcome::TransientError` (try again next tick).
 #[derive(Debug)]
@@ -109,6 +122,10 @@ impl std::fmt::Display for RefreshRejected {
 
 impl std::error::Error for RefreshRejected {}
 
+fn is_token_rejection(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 400 | 401 | 403)
+}
+
 pub async fn refresh_access_token(server_address: &str, refresh_token: &str) -> Result<(String, String)> {
     let client = api_client();
 
@@ -119,8 +136,12 @@ pub async fn refresh_access_token(server_address: &str, refresh_token: &str) -> 
         .send()
         .await?;
 
-    if !response.status().is_success() {
-        return Err(Report::new(RefreshRejected(response.status())));
+    let status = response.status();
+    if is_token_rejection(status) {
+        return Err(Report::new(RefreshRejected(status)));
+    }
+    if !status.is_success() {
+        return Err(Report::new(std::io::Error::other(format!("Token refresh failed with status {status}"))));
     }
 
     let parsed: RefreshResponse = response.json().await?;
@@ -192,6 +213,9 @@ pub async fn maybe_refresh_token(
     if refresh_token.is_empty() || !is_token_expiring_soon(token) {
         return RefreshOutcome::NotNeeded;
     }
+    if transient_failures().get(server_address).is_some_and(|at| at.elapsed() < TRANSIENT_RETRY_AFTER) {
+        return RefreshOutcome::TransientError;
+    }
     refresh_now(token, refresh_token, username, server_address).await
 }
 
@@ -217,6 +241,7 @@ pub async fn refresh_now(
             }
             *token = new_access_token;
             *refresh_token = new_refresh_token;
+            transient_failures().remove(server_address);
             info!("[refresh_now] Access token refreshed for {username}");
             RefreshOutcome::Refreshed
         }
@@ -225,6 +250,7 @@ pub async fn refresh_now(
             if e.downcast_ref::<RefreshRejected>().is_some() {
                 RefreshOutcome::Failed
             } else {
+                transient_failures().insert(server_address.to_string(), Instant::now());
                 RefreshOutcome::TransientError
             }
         }
@@ -328,8 +354,7 @@ mod tests {
         assert_eq!(outcome, RefreshOutcome::TransientError);
     }
 
-    #[tokio::test]
-    async fn maybe_refresh_token_reports_failed_when_the_server_actually_rejects_it() {
+    async fn outcome_for_status(status_line: &'static str) -> RefreshOutcome {
         use tokio::io::AsyncWriteExt;
         use tokio::net::TcpListener;
 
@@ -337,15 +362,62 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             if let Ok((mut socket, _)) = listener.accept().await {
+                let response = format!("HTTP/1.1 {status_line}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                let _ = socket.write_all(response.as_bytes()).await;
+            }
+        });
+
+        let server = format!("http://{addr}");
+        transient_failures().remove(&server);
+        let mut token = fake_jwt_with_exp(chrono::Utc::now().timestamp() - 60);
+        let mut refresh_token = "some-refresh-token".to_string();
+        maybe_refresh_token(&mut token, &mut refresh_token, "someone", &server).await
+    }
+
+    #[tokio::test]
+    async fn maybe_refresh_token_reports_failed_when_the_server_actually_rejects_it() {
+        assert_eq!(outcome_for_status("401 Unauthorized").await, RefreshOutcome::Failed);
+        assert_eq!(outcome_for_status("403 Forbidden").await, RefreshOutcome::Failed);
+        assert_eq!(outcome_for_status("400 Bad Request").await, RefreshOutcome::Failed);
+    }
+
+    #[tokio::test]
+    async fn a_transient_failure_is_not_retried_on_the_very_next_tick() {
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::Arc;
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counter = hits.clone();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                counter.fetch_add(1, Ordering::SeqCst);
                 let _ = socket
-                    .write_all(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                    .write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
                     .await;
             }
         });
 
+        let server = format!("http://{addr}");
         let mut token = fake_jwt_with_exp(chrono::Utc::now().timestamp() - 60);
-        let mut refresh_token = "dead-refresh-token".to_string();
-        let outcome = maybe_refresh_token(&mut token, &mut refresh_token, "someone", &format!("http://{addr}")).await;
-        assert_eq!(outcome, RefreshOutcome::Failed);
+        let mut refresh_token = "some-refresh-token".to_string();
+        for _ in 0..5 {
+            assert_eq!(maybe_refresh_token(&mut token, &mut refresh_token, "someone", &server).await, RefreshOutcome::TransientError);
+        }
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    // A proxy or overloaded server answering with its own error says nothing about
+    // whether the refresh token is still good - deleting the saved login over a 502
+    // would log the user out for a hiccup that clears itself.
+    #[tokio::test]
+    async fn maybe_refresh_token_treats_server_side_errors_as_transient() {
+        assert_eq!(outcome_for_status("502 Bad Gateway").await, RefreshOutcome::TransientError);
+        assert_eq!(outcome_for_status("503 Service Unavailable").await, RefreshOutcome::TransientError);
+        assert_eq!(outcome_for_status("429 Too Many Requests").await, RefreshOutcome::TransientError);
+        assert_eq!(outcome_for_status("404 Not Found").await, RefreshOutcome::TransientError);
     }
 }

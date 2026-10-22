@@ -1,4 +1,5 @@
 use reqwest::Client;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 // reqwest's default client has *no* request timeout at all, so a server that accepts a
@@ -21,18 +22,31 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 const DOWNLOAD_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 
+// Idle connections are dropped well before a typical reverse proxy would close them
+// itself, so a reused connection is never one the server has already hung up on.
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+
+static API_CLIENT: LazyLock<Client> = LazyLock::new(|| {
+    Client::builder()
+        .timeout(API_TIMEOUT)
+        .connect_timeout(CONNECT_TIMEOUT)
+        .pool_idle_timeout(POOL_IDLE_TIMEOUT)
+        .build()
+        .unwrap_or_else(|_| Client::new())
+});
+
 /// Client for ordinary API calls - JSON endpoints, cover images, ranged metadata reads.
 /// Everything with a bounded, small response body.
+///
+/// One shared client (a `Client` clone is a cheap handle to the same connection pool), so
+/// repeated calls reuse an open connection and its TLS session instead of paying a new
+/// TCP + TLS handshake - and a fresh client's setup cost - on every request.
 ///
 /// Falls back to a plain `Client::new()` if the builder somehow fails, since losing the
 /// timeout is strictly better than failing the request outright - that's exactly the
 /// behavior every call site had before this existed.
 pub fn api_client() -> Client {
-    Client::builder()
-        .timeout(API_TIMEOUT)
-        .connect_timeout(CONNECT_TIMEOUT)
-        .build()
-        .unwrap_or_else(|_| Client::new())
+    API_CLIENT.clone()
 }
 
 /// Client for bulk downloads (offline playback copies), which legitimately run for

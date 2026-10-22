@@ -360,6 +360,9 @@ pub struct App {
     pub update_uninstall_receiver: Option<tokio::sync::mpsc::UnboundedReceiver<ProgressEvent>>,
     pub update_uninstall_password_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     pub podcast_home_last_refresh: std::time::Instant,
+    // Set only while a periodic podcast Home refresh is in flight - see
+    // `refresh_podcast_home_if_stale` and `poll_podcast_home_refresh`.
+    podcast_home_receiver: Option<tokio::sync::oneshot::Receiver<Result<PodcastHomeData>>>,
     // None if the terminal doesn't support any image protocol (Kitty/Sixel/iTerm2) -
     // queried once at startup via Picker::from_query_stdio().
     pub image_picker: Option<ratatui_image::picker::Picker>,
@@ -540,11 +543,10 @@ async fn fetch_podcast_home_data(token: &str, server_address: String, id_selecte
 // - during which a user who can't see it playing may reselect it, thinking it's
 // unplayed, which used to restart the same session.
 //
-// Deliberately NOT a network fetch for full metadata: this runs on the main render
-// loop's own periodic refresh (`refresh_podcast_home_if_stale`), not a background task,
-// so any network call here blocks rendering and key handling for however long it takes
-// - and it would fire almost every time right after an autoplay transition, exactly
-// when this same propagation delay is in effect. Instead this reuses what's already
+// Deliberately NOT a network fetch for full metadata: this runs at the end of the
+// periodic refresh (`refresh_podcast_home_if_stale`), so a network call here would hold
+// up every refresh - and it would fire almost every time right after an autoplay
+// transition, exactly when this same propagation delay is in effect. Instead this reuses what's already
 // sitting in the local session row: `title` is stored as "Episode Title | Podcast
 // Title" (see the `insert_listening_session` call sites), split back apart here rather
 // than re-fetched. Subtitle/author/description/season/episode-number are left blank for
@@ -1269,6 +1271,7 @@ impl App {
         update_uninstall_receiver: None,
         update_uninstall_password_tx: None,
         podcast_home_last_refresh: std::time::Instant::now(),
+        podcast_home_receiver: None,
         image_picker,
         cover_protocol: None,
         cover_loaded_for_id: None,
@@ -1311,29 +1314,61 @@ impl App {
         }
     }
 
-    pub async fn refresh_podcast_home_if_stale(&mut self) -> Result<()> {
+    pub fn refresh_podcast_home_if_stale(&mut self) {
         // Finishing an episode doesn't push a signal to the main render loop (the
         // playback handler runs in a separate spawned task) - it just relies on this
         // periodic refresh to eventually notice the server-side "finished" flag and
         // drop it from the list. Kept short so that removal feels prompt.
         const STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(8);
 
-        if !self.is_podcast || self.podcast_home_last_refresh.elapsed() < STALE_AFTER {
-            return Ok(());
+        if !self.is_podcast || self.podcast_home_receiver.is_some() || self.podcast_home_last_refresh.elapsed() < STALE_AFTER {
+            return;
         }
+        let Some(token) = self.token.clone() else { return };
 
-        let Some(token) = self.token.clone() else { return Ok(()) };
+        // Stamped at start too, so a failing fetch is retried on the same cadence
+        // instead of every loop tick.
+        self.podcast_home_last_refresh = std::time::Instant::now();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let server_address = self.server_address.clone();
+        let id_selected_lib = self.id_selected_lib.clone();
+        let newest_first = self.podcast_sort_newest_first;
+        let username = self.username.clone();
+        tokio::spawn(async move {
+            let _ = tx.send(fetch_podcast_home_data(&token, server_address, &id_selected_lib, newest_first, &username).await);
+        });
+        self.podcast_home_receiver = Some(rx);
+    }
 
+    // Non-blocking check for the refresh spawned above - called from main.rs's render
+    // loop every iteration, same shape as poll_pod_ep_fetch.
+    pub fn poll_podcast_home_refresh(&mut self) {
+        let Some(rx) = self.podcast_home_receiver.as_mut() else { return };
+        let result = match rx.try_recv() {
+            Ok(result) => result,
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty) => return,
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                self.podcast_home_receiver = None;
+                return;
+            }
+        };
+        self.podcast_home_receiver = None;
+        match result {
+            Ok(data) => self.apply_podcast_home_data(data),
+            Err(e) => warn!("[refresh_podcast_home] {e}"),
+        }
+    }
+
+    fn apply_podcast_home_data(&mut self, data: PodcastHomeData) {
         // The refreshed list's composition/order can shift (an episode finishes and
         // drops out, a new one appears, published_at ties break differently) - remember
-        // which episode the cursor was on so it can be re-found below, otherwise the
+        // which episode the cursor is on so it can be re-found below, otherwise the
         // still-valid numeric index silently ends up pointing at a different episode and
         // the selection bar appears to jump around on its own every refresh.
         let selected_ep_id = self.list_state_cnt_list.selected()
             .and_then(|i| self.ids_ep_cnt_list.get(i))
             .cloned();
 
-        let data = fetch_podcast_home_data(&token, self.server_address.clone(), &self.id_selected_lib, self.podcast_sort_newest_first, &self.username).await?;
         self._ids_cnt_list = data.ids;
         self._titles_cnt_list = data.titles;
         self.ids_ep_cnt_list = data.ids_ep;
@@ -1349,7 +1384,8 @@ impl App {
         self.episode_embedded_cover_ino_cnt_list = data.embedded_cover_ino;
         self.podcast_home_last_refresh = std::time::Instant::now();
 
-        if get_is_auto_download(&self.username) == "1" {
+        if get_is_auto_download(&self.username) == "1"
+            && let Some(token) = self.token.clone() {
             sync_auto_downloads_podcasts(self.username.clone(), token, self.server_address.clone(), self._ids_cnt_list.clone(), self.ids_ep_cnt_list.clone(), self._titles_cnt_list.clone(), self.titles_pod_cnt_list.clone());
         }
 
@@ -1365,14 +1401,15 @@ impl App {
                 // otherwise silently point at a different episode once the list shifts.
                 self.list_state_cnt_list.select(Some(new_pos));
         }
-
-        Ok(())
     }
 
     // Applies a permutation to every one of the podcast Home list's parallel arrays at
     // once, so they can never end up desynced from each other - used both when pinning
     // the now-playing episode to the top and when toggling sort order.
     pub fn reorder_podcast_lists(&mut self, order: &[usize]) {
+        // A refresh already in flight was fetched against the old order, so applying it
+        // later would undo this change (an episode just marked finished would reappear).
+        self.podcast_home_receiver = None;
         self._titles_cnt_list = order.iter().map(|&i| self._titles_cnt_list[i].clone()).collect();
         self._ids_cnt_list = order.iter().map(|&i| self._ids_cnt_list[i].clone()).collect();
         self.ids_ep_cnt_list = order.iter().map(|&i| self.ids_ep_cnt_list[i].clone()).collect();

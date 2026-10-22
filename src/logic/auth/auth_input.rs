@@ -10,7 +10,7 @@ use ratatui_textarea::TextArea;
 use ratatui::layout::{Constraint, Layout, Rect};
 use crate::ui::theme;
 use crate::api::server::auth_process::{auth_process, finish_login};
-use crate::api::server::oidc_login::{AuthMethods, SsoUpdate, fetch_auth_methods, sso_login};
+use crate::api::server::oidc_login::{AuthMethods, SsoUpdate, base_url, fetch_auth_methods, sso_login};
 use crossterm::event::{self, KeyEvent, KeyCode};
 use log::{info, error};
 use tokio::sync::mpsc;
@@ -144,7 +144,7 @@ impl AppLogin {
             match crossterm::event::read()? {
                 event::Event::Key(KeyEvent { code: KeyCode::Enter, .. }) => {
                     if current_index == 0 {
-                        let server_address = textareas[0].lines().join("\n");
+                        let server_address = base_url(&textareas[0].lines().join("\n")).to_string();
                         let methods = probe_auth_methods(&server_address);
                         collected_data.push(server_address);
                         match methods {
@@ -223,12 +223,10 @@ impl AppLogin {
                 ).await {
                     Ok(_response) => {
                         info!("[auth_process] Login successful");
-                        println!("Login successful");
                         let _ = update_login_err("");
                     }
                     Err(e) => {
                         error!("[auth_process] Login failed: {e}");
-                        eprintln!("ERROR: {e}");
                         let err = format!("ERROR: {e}");
                         let _ = update_login_err(err.as_str());
                     }

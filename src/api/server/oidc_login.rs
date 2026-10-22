@@ -29,7 +29,9 @@ pub fn redirect_uri(port: u16) -> String {
     format!("http://127.0.0.1:{port}{CALLBACK_PATH}")
 }
 
-fn base_url(server_address: &str) -> &str {
+/// The address without surrounding whitespace or trailing slashes, so `{base}/login`
+/// never becomes `//login`.
+pub fn base_url(server_address: &str) -> &str {
     server_address.trim().trim_end_matches('/')
 }
 
@@ -445,6 +447,13 @@ pub async fn sso_login(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn base_url_drops_whitespace_and_trailing_slashes_only() {
+        assert_eq!(base_url("  https://abs.example.com/ "), "https://abs.example.com");
+        assert_eq!(base_url("http://192.168.1.5:13378///"), "http://192.168.1.5:13378");
+        assert_eq!(base_url("https://example.com/audiobookshelf"), "https://example.com/audiobookshelf");
+    }
 
     #[test]
     fn pkce_challenge_matches_rfc7636_vector() {

@@ -2,6 +2,12 @@ use magic_crypt::{new_magic_crypt, MagicCryptTrait};
 use std::env;
 use log::error;
 
+// `.env` is read once at startup, hence the restart.
+const MISSING_SECRET_MESSAGE: &str = "No secret found in .env. Do this:\n\
+mkdir -p ~/.config/absotui\n\
+echo 'ABSOTUI_SECRET_KEY=secret' >> ~/.config/absotui/.env\n\
+then restart Absotui.";
+
 pub fn encrypt_token(token_to_encrypt: &str) -> Result<String, String> {
 
 
@@ -18,12 +24,8 @@ pub fn encrypt_token(token_to_encrypt: &str) -> Result<String, String> {
 
         Ok(encrypted_token)
     } else {
-        error!("No secret found in .env. Do this:\n
-            mkdir -p ~/.config/absotui\n
-            echo 'ABSOTUI_SECRET_KEY=secret' >> ~/.config/absotui/.env");
-        Err("No secret found in .env. Do this:\n
-            mkdir -p ~/.config/absotui\n
-            echo 'ABSOTUI_SECRET_KEY=secret' >> ~/.config/absotui/.env".to_string())
+        error!("{MISSING_SECRET_MESSAGE}");
+        Err(MISSING_SECRET_MESSAGE.to_string())
     }
 }
 
@@ -44,18 +46,21 @@ pub fn decrypt_token(encrypted_token: &str) -> Result<String, String> {
             Err("Failed to decrypt the token.".to_string())
         }
     } else {
-        error!("No secret found in .env. Do this:\n
-            mkdir -p ~/.config/absotui\n
-            echo 'ABSOTUI_SECRET_KEY=secret' >> ~/.config/absotui/.env");
-        Err("No secret found in .env. Do this:\n
-            mkdir -p ~/.config/absotui\n
-            echo 'ABSOTUI_SECRET_KEY=secret' >> ~/.config/absotui/.env".to_string()) 
+        error!("{MISSING_SECRET_MESSAGE}");
+        Err(MISSING_SECRET_MESSAGE.to_string())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_secret_message_has_no_stray_indentation_and_says_to_restart() {
+        assert!(!MISSING_SECRET_MESSAGE.contains("  "));
+        assert_eq!(MISSING_SECRET_MESSAGE.lines().count(), 4);
+        assert!(MISSING_SECRET_MESSAGE.ends_with("then restart Absotui."));
+    }
 
     #[test]
     fn encrypt_decrypt_roundtrip() {

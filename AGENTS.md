@@ -758,3 +758,60 @@ were not reproduced and may or may not be gone (see the entry above); ask if the
 Remaining ideas from the 2026-10-21 audit are untouched: inline podcast home refresh, one shared
 HTTP client, event-driven wakeups. This entry is the only commit after the bump, so `stable`
 stays on the bump commit, which is fine (no installed file changed).
+
+### 2026-10-22 — Claude Code (pending issues from the audit and handoffs, uncommitted)
+
+**What changed:** Paul asked to fix the pending issues. GitHub has only #11 open (waiting on the
+reporter) and `known_bugs.md` lists nothing open, so the work came from the earlier handoff notes.
+1. *A failed token refresh no longer deletes the saved login for a server hiccup*
+   (`src/api/server/refresh_token.rs`). Only 400/401/403 mean the refresh token is dead; a 502/503/
+   429/404 or a network error is transient. Transient failures are now also throttled to one retry
+   per 15 s per server - the loop ticks several times a second and would otherwise hammer a
+   struggling server (first version of this fix made 32 attempts in 8 s; caught in the live test).
+2. *The podcast Home refresh no longer runs inside the draw loop* (`src/app.rs`, `src/main.rs`):
+   it runs in a spawned task and a poll merges the result, like the episode-list prefetch. The
+   selection is re-found at merge time, and any reorder of the list (`F`, `D`, the now-playing pin)
+   discards a fetch already in flight so it can't undo the change. A failing fetch retries on the
+   8 s cadence instead of every tick.
+3. *Log growth:* the per-episode line on every refresh is now debug level, a missing progress
+   record (404 for a never-played episode) is normal instead of a warning, and the log rotates at
+   startup past 5 MB, keeping one `absotui.log.old` (`src/utils/logs.rs`).
+4. *One shared HTTP client* for API calls (`src/utils/http_client.rs`): connections and TLS
+   sessions are reused (idle ones dropped after 30 s). The progress lookup now reads the body of
+   its 404 responses, because an unread body stops a connection from being reused.
+5. *Small leftovers:* the missing-`ABSOTUI_SECRET_KEY` message is one clean 4-line text that now
+   says to restart; `pop_message` converts newlines to CR+LF (raw mode otherwise staircases a
+   multi-line message); the entered server address is trimmed of whitespace and trailing slashes
+   when typed (a trailing `/` built `//login`); two stray `println!`/`eprintln!` in the login task
+   that wrote raw text onto the live login screen were removed.
+
+**How it was verified:** `cargo build`, `cargo test` (107 passed: 101 plus 6 new - refresh status
+mapping and backoff, log rotation, the message text, address trimming), `cargo clippy
+--all-targets` (only the 5 existing `too_many_arguments` warnings). Live against a fake server
+(scratch config, Paul's server and session untouched), old v0.11.2 vs new build:
+- 502 on the refresh endpoint: old deleted the saved login and dropped to the login screen with
+  "session expired"; new kept the login, stayed on the library, 1 attempt (32 before the backoff).
+- Podcast Home on a 110 ms server over 40 s: old had 4 input stalls over 300 ms (one per
+  refresh), new none; median key latency 105 -> 60 ms; the list still refreshed 6 times.
+- Connections for ~105 requests: old 106 (one per request), new 9.
+- A 6 MB log at launch became `absotui.log.old` with a fresh 1.5 KB log.
+- Address typed as ` http://127.0.0.1:18090/ ` logs in and is saved without the slash/spaces;
+  the missing-key message renders as four lines at column 0.
+- Regression sweep on the final binary: startup, idle CPU (4.4-4.7% vs 4.4-4.5%), memory, play
+  start (2.51 -> 1.63 s), the `d`-key border fix and Auto Download (9 downloads, 9 files verified,
+  28 MB peak) all unchanged or better. The first test harness run was invalid (its login helper
+  used the old binary, which deleted the user itself) and was redone with the new build logging in.
+
+**Not done / still open:** event-driven wakeups for the main loop (covers appear ~375 ms after
+selecting; a bigger refactor), cover decode/resize still on the UI thread for very large images,
+the first keypress swallowed when the terminal never answers the image query (ratatui-image's
+reader thread), background threads printing status messages can still interleave with a redraw,
+a few remaining stray prints on rare failure paths (`app.rs` decrypt errors, `crud.rs`, the three
+"Failed to start playback session" `eprintln!`s), multi-track books re-download finished tracks
+if a later one fails, a player that never becomes reachable can't be stopped, and Paul's own calls:
+whether `R` should keep Home instead of reinitialising to Library, `/` from the episode view,
+rustfmt, the AUR package (no account), #11 (waiting on the reporter). Not verified: real server,
+real terminal, macOS.
+
+**Open questions / handoff:** needs Paul's go-ahead to commit and push; a patch release would
+need a changelog entry first (none written for these).

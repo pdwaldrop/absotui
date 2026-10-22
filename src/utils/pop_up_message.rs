@@ -31,7 +31,9 @@ pub fn pop_message(stdout: &mut Stdout, lines_from_bottom: u16, message: &str) -
         terminal::Clear(terminal::ClearType::CurrentLine),
     )?;
 
-    println!("{message}");
+    // Raw mode doesn't turn "\n" into a carriage return too, so a multi-line message
+    // would otherwise staircase to the right.
+    println!("{}", message.replace('\n', "\r\n"));
 
     Ok(())
 }

@@ -4,7 +4,7 @@ use reqwest::header::AUTHORIZATION;
 use color_eyre::eyre::{Result, Report};
 use serde::Deserialize;
 use serde::Serialize;
-use log::{info, warn};
+use log::{debug, warn};
 use crate::api::me::get_media_progress::{get_episode_progress, Root as Progress};
 use crate::utils::http_client::MAX_CONCURRENT_REQUESTS;
 use futures::stream::{self, StreamExt};
@@ -229,7 +229,7 @@ pub async fn get_new_and_unfinished_pod(token: &str, server_address: String, id_
         progress_futures.push(async move {
             match (&library_item_id, &episode_id) {
                 (Some(lib_id), Some(ep_id)) => match get_episode_progress(&token, lib_id, ep_id, server_address).await {
-                    Ok(p) => Some(p),
+                    Ok(p) => p,
                     Err(e) => {
                         warn!("[get_new_and_unfinished_pod] progress lookup failed for '{episode_title}' ({lib_id}/{ep_id}), treating as unfinished: {e}");
                         None
@@ -249,7 +249,7 @@ pub async fn get_new_and_unfinished_pod(token: &str, server_address: String, id_
         let episode_id = entity.recent_episode.as_ref().and_then(|ep| ep.id.clone());
         let episode_title = entity.recent_episode.as_ref().and_then(|ep| ep.title.clone()).unwrap_or_default();
         let is_finished = progress.as_ref().is_some_and(|p| p.is_finished);
-        info!("[get_new_and_unfinished_pod] '{episode_title}' ({episode_id:?}) isFinished={is_finished}");
+        debug!("[get_new_and_unfinished_pod] '{episode_title}' ({episode_id:?}) isFinished={is_finished}");
         if !is_finished {
             if let Some(p) = &progress {
                 entity.progress_percent = Some((p.progress * 100.0) as f32);
