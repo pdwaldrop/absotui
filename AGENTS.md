@@ -986,3 +986,17 @@ annoying the clippy step can be made advisory (`continue-on-error`) or the toolc
 real run, so watch it and fix forward (a red macOS job is the thing to expect). Once it's green, a CI badge
 in the README is a natural follow-up. The same workflow could later dry-run the LTO + strip release profile
 (28 -> 16 MB) before it touches a real release.
+
+### 2026-10-22 — Claude Code (CI: first run on GitHub, follow-up to the entry above)
+
+**What changed:** Nothing in the workflow. This closes the "not run on GitHub yet" gap in the CI entry above.
+`ci.yml` was pushed as 0d8a5cb and its first run (39857008719, cold cache) passed on both ubuntu-latest and
+macos-latest: build, test and clippy all green, about 3 minutes per job. So the tests have now been run on
+macOS for the first time, and the feared macOS surprises (mpv socket-path limit, `Library/Preferences`
+paths) did not materialize. The one annotation is GitHub's Node 20 deprecation notice for
+`actions/checkout@v4`, the same one the release workflows carry.
+
+**Open questions / handoff:** A CI badge in the README is the natural follow-up. Still to watch: the first
+time a new Rust release adds a clippy lint (CI would go red with no code change; make the clippy step
+advisory or pin the toolchain if that bites). The LTO + strip release profile can now be dry-run on CI
+before touching a real release.

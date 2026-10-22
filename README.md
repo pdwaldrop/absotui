@@ -1,5 +1,6 @@
 [![GitHub release](https://img.shields.io/github/v/release/pdwaldrop/absotui?label=Latest%20Release&color=green&cacheSeconds=3600)](https://github.com/pdwaldrop/absotui/releases/latest)
 [![Release](https://github.com/pdwaldrop/absotui/actions/workflows/release.yml/badge.svg)](https://github.com/pdwaldrop/absotui/actions/workflows/release.yml)
+[![CI](https://github.com/pdwaldrop/absotui/actions/workflows/ci.yml/badge.svg)](https://github.com/pdwaldrop/absotui/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-CE422B?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-informational)
