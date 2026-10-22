@@ -1000,3 +1000,36 @@ paths) did not materialize. The one annotation is GitHub's Node 20 deprecation n
 time a new Rust release adds a clippy lint (CI would go red with no code change; make the clippy step
 advisory or pin the toolchain if that bites). The LTO + strip release profile can now be dry-run on CI
 before touching a real release.
+
+### 2026-10-22 — Claude Code (tmux startup investigation: nothing to ship, one earlier claim corrected)
+
+**What changed:** No code. Paul asked to fix the "slow tmux startup / lost first keypress" listed as open in the
+2026-10-21 and 2026-10-22 entries. Investigating showed that claim was wrong as written: it came from a
+*detached* tmux test session, which has no outer terminal to answer the image-protocol query. Corrected
+picture: ratatui-image 11.0.6 detects tmux (`TERM` starts with `tmux` or `TERM_PROGRAM=tmux`) and runs
+`tmux set -p allow-passthrough on` for the pane itself before querying, so with a real attached tmux over a
+terminal that answers (Ghostty, Kitty, ...) startup is normal and the first key works. Measured with a real
+tmux client attached to a pty that answers like Ghostty: first screen 0.3-1.4 s (noisy machine), first `j`
+worked, every key moved exactly one row (checked on the actual tmux pane, not by byte matching).
+
+**What is still true (narrow):** if the outer terminal never answers (silent), the query waits its full 2 s and
+the library's leftover reader thread swallows the first keypress (reproduced: first `j` lost, 2.4-3.3 s start).
+If the outer terminal answers late (3 s), the thread consumes the late replies and nothing leaks - the
+installed v0.11.4 handled that cleanly.
+
+**A fix was tried and reverted:** after a timed-out query, write `ESC [ 5 n` so tmux itself answers and the stuck
+thread takes that reply instead of the key. It did stop the lost key in the silent case, but in the late-answer
+case it made the thread exit early, so the late replies then reached the input handler as stray characters
+(row 14 selected instead of 5 - letters like `c`, `i`, `O`, `R` are live keybindings). Reproduced twice against a
+no-fix baseline, so it is a net loss and was not committed. Not worth a bigger change (our own poll()-based probe
+with no helper thread, which would also have to replicate the library's tmux passthrough handling) for a
+terminal that never answers, which I could not find in real use.
+
+**How it was verified:** attached-tmux harness (tmux client on a pty that answers instantly / never / after 3 s)
+against the new build and the installed v0.11.4, with the selected row read from `tmux capture-pane`. The
+tree was reverted to HEAD and rebuilt; 118 tests pass.
+
+**Open questions / handoff:** The 2026-10-21 entry's parenthetical "(e.g. tmux without passthrough)" is wrong -
+ignore it. Test setups with a detached tmux session (or any pty with nothing answering) will always show the 2 s
+wait and the lost first key; that is the harness, not tmux. Remaining open ideas from earlier entries are
+unchanged (event-driven wakeups, central status-message channel, the LTO release profile).
