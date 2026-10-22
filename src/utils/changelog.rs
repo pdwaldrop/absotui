@@ -1379,8 +1379,7 @@ let changelog_82 = "Changelog Absotui v0.11.3 (22/10/2026) \n\
          \n\
          Enjoy!\n
          ####\n".to_string();
-let changelog_83 = format!(
-    "Changelog Absotui v{VERSION} (22/10/2026) \n\
+let changelog_83 = "Changelog Absotui v0.11.4 (22/10/2026) \n\
          \n\
          Fixed:\n\
          - Listening progress could end up unreadable. While you listened,\n\
@@ -1420,10 +1419,25 @@ let changelog_83 = format!(
            episode.\n\
          \n\
          Enjoy!\n
+         ####\n".to_string();
+let changelog_84 = format!(
+    "Changelog Absotui v{VERSION} (22/10/2026) \n\
+         \n\
+         Changed:\n\
+         - Things show up the moment they're ready. Absotui used to look for\n\
+           news a few times a second, so a new cover, the player bar or a\n\
+           refreshed list could be ready a moment before you saw it. It now\n\
+           redraws as soon as something changes: in testing a new cover\n\
+           appeared in about 13 ms instead of 260 ms, and the player bar\n\
+           after pressing play in about 120 ms instead of 265 ms. Keys,\n\
+           resizing and CPU use while it sits open are unchanged.\n\
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_84);
     changelog.push_str(&changelog_83);
     changelog.push_str(&changelog_82);
     changelog.push_str(&changelog_81);
