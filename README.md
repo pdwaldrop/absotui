@@ -32,7 +32,7 @@
 
 ## ✨ Features
 
-Absotui is a minimalist TUI built in Rust. It opens instantly and loads quickly, even with huge libraries.
+Absotui is a minimalist TUI built in Rust. It opens fast, barely touches your CPU while it's just sitting there, and stays quick even with a huge library.
 
 - **Books & podcasts, both first-class:** a unified "New & Unfinished" podcast home, instant mark-as-finished (<kbd>F</kbd>), and auto-play straight into the next unfinished episode
 - **Manage podcast subscriptions:** add a show by name or a direct RSS URL (<kbd>A</kbd>), with cover art and a description shown as you browse the results, or remove one (<kbd>C</kbd>, keeping or deleting its downloaded files). It's all done from Library, with no separate screen
@@ -44,6 +44,7 @@ Absotui is a minimalist TUI built in Rust. It opens instantly and loads quickly,
 - **Desktop integration:** a custom app icon, a taskbar/dock icon on supported terminals, and a window title showing what's playing
 - **Uses your terminal's colors:** follows your terminal color scheme/theme
 - **In-app updates:** Settings > Update / Uninstall runs the install flow without leaving the app
+- **Pick your player:** VLC or mpv, whichever you like better. The installer asks, and you can switch any time in Settings > Player
 - **Per-item playback speed:** optionally (Settings > Per-Item Speed) save a separate speed for each book or podcast instead of sharing one across everything
 - **Progress sync:** keeps audiobook and podcast episode progress in sync with your server
 - **SSO sign-in:** log in with a username and password, or through your server's identity provider (OpenID Connect). See [Signing in with SSO](#-signing-in-with-sso)
@@ -88,7 +89,7 @@ In `/usr/local/bin` (option 1, from install script) or `~/.cargo/bin` (option 2,
 In `~/.config/absotui` (Linux) or `~/Library/Preferences` (macOS) — the default path when `XDG_CONFIG_HOME` is empty:
 - `.env` — contains the secret key
 - `config.toml` — configuration file
-- `absotui.log` — log file
+- `absotui.log` — log file (it starts over at 5 MB, and the last one is kept as `absotui.log.old`)
 - `db.sqlite3` — SQLite database file
 - `covers/` — on-disk cache of cover art (populated automatically as covers load)
 - `downloads/` — books and podcast episodes downloaded for offline playback (only appears once you download something)
@@ -169,7 +170,7 @@ This uses the same OpenID support as the Audiobookshelf mobile app, so it needs 
 ---
 
 ## 🛠️ Roadmap
-Recent work: sign in through your server's identity provider (SSO / OpenID Connect), and each Linux release now also ships as an AppImage (see Installation above).
+Recent work: you can play through mpv as well as VLC, sign in through your server's SSO (OpenID Connect), and grab the AppImage on Linux. I also spent a while making it lighter, so it uses a lot less CPU while it's open and no longer waits on GitHub to start.
 
 Planned: an AUR package (`absotui-bin`), on hold until AUR registrations reopen.
 
