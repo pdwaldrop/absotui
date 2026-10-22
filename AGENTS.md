@@ -1078,3 +1078,16 @@ release that ships this (it would be a user-visible "feels snappier" note, not a
 the loop: while the event stream exists, `event::read`/`poll`, `cursor::position` and `Terminal::clear` block - drop
 the stream first or use `clear_screen`. Remaining ideas from earlier entries: central status-message channel,
 LTO/strip release profile.
+
+### 2026-10-22 — Claude Code (event-driven main loop: committed and pushed)
+
+**What changed:** Nothing in the code. Closes the "not committed" note in the entry above: with Paul's go-ahead the
+event-driven main loop went to `main` as 4f67885 (together with the CLAUDE.md main-loop paragraph). The only change
+between the last test run and the commit was one comment line above `biased;`.
+
+**How it was verified:** Before committing: `cargo test` 122 passed and clippy clean with the CI flags. After
+pushing: the CI run for 4f67885 passed on both ubuntu-latest and macos-latest (build, test, clippy).
+
+**Open questions / handoff:** Not released - no changelog entry yet; a v0.11.5 would carry a short "covers and the
+player bar appear the moment they are ready" note. Still not tried on Paul's real account, in Ghostty, or in a long
+real playback session, so the first real-world look is whenever he runs a build from `main`.
