@@ -924,3 +924,38 @@ changelog entry (none written for the 2026-10-22 work after v0.11.3). Still open
 event-driven wakeups, big-cover decode off the UI thread (the 600 px request mostly avoids it), the
 first keypress swallowed by terminals that never answer the image query, and a few stray prints on
 rare failure paths.
+
+### 2026-10-22 — Claude Code (v0.11.4 release)
+
+**What changed:** Cut v0.11.4 (patch) at Paul's request, covering everything that landed on `main` after
+v0.11.3: 63c134a (a failed token refresh only deletes the saved login on 400/401/403, transient ones
+backed off 15 s; podcast Home refresh in a background task; one shared HTTP client; log rotation at
+5 MB; clean missing-key message and CR+LF in status messages; address trimming; two stray login prints
+removed), 8a58716 (playback position sent as numbers and read back leniently) and 6d3294d (the
+optimization scrub: per-thread database connection reuse, windowed list rendering, search cache, update
+check off the startup path, ping alongside libraries, concurrency 12, cover HTTP errors not cached). The
+v0.11.3 changelog entry was frozen and a v0.11.4 one added (cf927ed) before cutting; the bump commit is
+bc9746a.
+
+**How it was verified:** `cargo test` (118 passed) and `cargo clippy --all-targets` (only the 5 existing
+`too_many_arguments` warnings) before the changelog commit. Cut Release and Release workflows both
+succeeded; all 12 assets are on the release, downloaded into a fresh directory and checked against
+`SHA256SUMS.txt` (all OK). The x86_64 binary and the AppImage report 0.11.4; all three binaries contain the
+new changelog text. Highest glibc requirement unchanged: 2.34 (x86_64), 2.18 (aarch64); macOS tarball is a
+universal binary; `ubuntu-latest` is Ubuntu 26.04.1 and the build was unaffected. `main`, `stable` and the
+tag sit on the bump commit and the four files the installer fetches from `stable` are byte-identical to the
+release assets. The code itself was tested earlier today against a fake server and against Paul's real
+account (see the entries above).
+
+**Not verified:** a real `absotui --update` or fresh install from this release on any machine; the aarch64
+and macOS binaries were inspected, not run; the AppImage ran with `APPIMAGE_EXTRACT_AND_RUN`, not through
+FUSE; audible playback (Paul's Bluetooth headset stalls mpv's clock, see the playback entry); book-library
+views on the real account.
+
+**Open questions / handoff:** Paul's installed copy is still v0.11.3 and rewrites string-typed progress
+whenever he listens until he runs `absotui --update`. The episode "They're Going to Bulldoze the Graves..."
+sits at 0:46 from the tests (reset offered, not done). Still open from earlier entries: event-driven
+wakeups, the first keypress swallowed by terminals that never answer the image query, a few stray prints
+on rare failure paths, the release-profile (LTO + strip) decision, and Paul's own calls (`R` keeping Home,
+`/` from the episode view, rustfmt, AUR, #11). This entry is the only commit after the bump, so `stable`
+stays on the bump commit, which is fine (no installed file changed).
