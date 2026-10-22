@@ -1091,3 +1091,33 @@ pushing: the CI run for 4f67885 passed on both ubuntu-latest and macos-latest (b
 **Open questions / handoff:** Not released - no changelog entry yet; a v0.11.5 would carry a short "covers and the
 player bar appear the moment they are ready" note. Still not tried on Paul's real account, in Ghostty, or in a long
 real playback session, so the first real-world look is whenever he runs a build from `main`.
+
+### 2026-10-22 — Claude Code (v0.11.5 release)
+
+**What changed:** Cut v0.11.5 (patch) at Paul's request. It carries one change since v0.11.4: the event-driven main
+loop (4f67885) - covers, the player bar and refreshed lists appear the moment they are ready instead of at the next
+tick. The v0.11.4 changelog entry was frozen to a plain string and a v0.11.5 one added (9d96e45) before cutting; the
+workflow's bump commit is b171bdc. The CI badge, CI workflow and the tmux investigation entry from earlier today
+were already in v0.11.4's tree or are not user-facing, so they are not in the changelog.
+
+**How it was verified:** `cargo test` (122 passed) and clippy with the CI flags clean before the changelog commit;
+CI on that push and on the earlier code commit passed on ubuntu and macOS. Cut Release and Release workflows both
+succeeded (all three binary builds and the checksum job); all 12 assets are on the release, downloaded into a fresh
+directory and checked against `SHA256SUMS.txt` (all OK). The x86_64 binary and the x86_64 AppImage report 0.11.5;
+all three binaries contain the new changelog text and the frozen v0.11.4 entry. Highest glibc requirement, read
+from the ELF table, is unchanged: 2.34 (x86_64), 2.18 (aarch64); the macOS tarball is a universal binary. `main`,
+`stable` and the tag all sit on the bump commit, and the four files the installer fetches from `stable`
+(`hello_absotui.sh`, `config.example.toml`, `absotui.desktop`, `absotui.svg`) are byte-identical to the release
+assets. Downloaded files were removed afterwards.
+
+**Not verified:** a real `absotui --update` or fresh install from this release on any machine; the aarch64 and macOS
+binaries were inspected, not run; the AppImage ran with `APPIMAGE_EXTRACT_AND_RUN`, not through FUSE; the new loop on
+Paul's real account, in Ghostty, on macOS, or in a long real playback session (everything was a fake server plus a
+pty and real tmux).
+
+**Open questions / handoff:** Paul's installed copy is v0.11.4 until he runs `absotui --update`; the first real-world
+look at the event-driven loop is whenever he does. If anything feels off (a screen that doesn't refresh, keys that lag,
+CPU that doesn't settle), suspect the loop first: the rule for future code is in CLAUDE.md. This entry is the only
+commit after the bump, so `stable` stays on the bump commit, which is fine (no installed file changed). Still open
+from earlier entries: central status-message channel, the LTO release profile (can be dry-run on CI), and Paul's own
+calls (`R` keeping Home, `/` from the episode view, rustfmt, AUR).
