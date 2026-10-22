@@ -726,3 +726,35 @@ selector) is a possible contributor in some terminals - also untested.
 earlier commit as part of a patch release). If the stray letters come back in a normal terminal,
 get the exact keys pressed beforehand and re-test with the detector in the scratchpad approach
 (see memory: dev-environment-gotchas).
+
+### 2026-10-22 — Claude Code (v0.11.3 release)
+
+**What changed:** Cut v0.11.3 (patch) at Paul's request: the Auto Download fixes, the loop and
+player-poll speedups, and the `d`-key repaint fix from the entries above. The v0.11.2 changelog
+entry was frozen to a plain string and a v0.11.3 one added (commit 0a4c239) before cutting; the
+workflow's bump commit is 3b32f5a. Release note text is the one-line summary Paul approved by
+asking for the release; the in-app changelog has the detail.
+
+**How it was verified:** `cargo build`/`test` (101 passed)/`clippy --all-targets` clean before the
+changelog commit and again after it. Cut Release and Release workflows both succeeded (all three
+binary builds and the checksum job); all 12 assets are on the release, downloaded into a fresh
+directory and checked against `SHA256SUMS.txt` (all OK). The x86_64 binary and the AppImage report
+0.11.3; all three binaries contain the new changelog text and the new download code. Highest glibc
+requirement, read from the ELF table, is unchanged: 2.34 (x86_64), 2.18 (aarch64). The macOS
+tarball is a universal binary. `main`, `stable` and the tag sit on the bump commit; the four files
+the installer fetches from `stable` are byte-identical to the release assets. `ubuntu-latest`
+now resolves to Ubuntu 26.04.1 (seen in the cut-release and aarch64/checksum job logs): the move
+that was being watched has happened, and it changed nothing (x86_64 stays pinned to 22.04, aarch64
+builds inside `cross`).
+
+**Not verified:** a real `absotui --update` or fresh install from this release on any machine;
+the aarch64 and macOS binaries were inspected, not run; the AppImage was run only with
+`APPIMAGE_EXTRACT_AND_RUN` (not through FUSE); Paul's own server and terminal with the new build
+for more than a few minutes.
+
+**Open questions / handoff:** Paul's running copy may still be the pre-fix build - `absotui
+--update` (or quit and relaunch from the repo) picks up 0.11.3. The stray `L`/`J` cells Paul saw
+were not reproduced and may or may not be gone (see the entry above); ask if they come back.
+Remaining ideas from the 2026-10-21 audit are untouched: inline podcast home refresh, one shared
+HTTP client, event-driven wakeups. This entry is the only commit after the bump, so `stable`
+stays on the bump commit, which is fine (no installed file changed).
