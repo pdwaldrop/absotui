@@ -25,7 +25,7 @@ cargo test <name>         # run a single test by name
 cargo clippy --all-targets
 ```
 
-There is no CI test/lint workflow (`.github/workflows/` only has `release.yml`, which builds and uploads binaries on a GitHub release) - `cargo build`/`clippy`/`test` are not run automatically, so run them yourself before committing.
+`.github/workflows/ci.yml` runs `cargo build`, `cargo test` and `cargo clippy --all-targets -- -D warnings -A clippy::too_many_arguments` (all `--locked`) on Linux and macOS for every push to `main` and every pull request - it's the only thing that runs the tests, since `release.yml` just builds. Run the same three commands yourself before pushing so `main` doesn't go red. (Pushes made with `GITHUB_TOKEN`, like `cut-release`'s version bump, don't trigger it.)
 
 ### Actually exercising the app
 

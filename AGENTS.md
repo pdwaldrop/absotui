@@ -959,3 +959,30 @@ wakeups, the first keypress swallowed by terminals that never answer the image q
 on rare failure paths, the release-profile (LTO + strip) decision, and Paul's own calls (`R` keeping Home,
 `/` from the episode view, rustfmt, AUR, #11). This entry is the only commit after the bump, so `stable`
 stays on the bump commit, which is fine (no installed file changed).
+
+### 2026-10-22 — Claude Code (CI workflow, uncommitted)
+
+**What changed:** Added `.github/workflows/ci.yml`: on every push to `main`, every pull request and manual
+dispatch it runs `cargo build --locked`, `cargo test --locked` and
+`cargo clippy --locked --all-targets -- -D warnings -A clippy::too_many_arguments` on ubuntu-latest and
+macos-latest (cargo cache via Swatinem/rust-cache, 40 min timeout, older runs on the same branch cancelled,
+read-only token). Nothing automated ran the tests before - `release.yml` only builds - and a unit test
+caught a real deadlock in new code earlier today, which is why this was the first thing picked from the
+"what next" list. `CLAUDE.md` no longer says there is no CI.
+
+**How it was verified:** The workflow file parses as YAML (triggers, one job, a two-OS matrix) and the three
+commands were run locally exactly as written: build ok, 118 tests passed, clippy clean. The suite was run 14
+more times to look for flakiness (8 default, 3 single-threaded, 3 pinned to one CPU core): all passed.
+Not run on GitHub yet.
+
+**Not verified:** the workflow actually running on GitHub, and in particular the macOS job - the release
+workflow already builds a macOS binary, but the tests have never been run on macOS (the mpv socket-path
+limit and `Library/Preferences` paths are the likeliest places for a surprise). First run is cold (no
+cargo cache), so expect several minutes. Trade-off to know about: `-D warnings` plus a moving `stable`
+toolchain means a new Rust release can add a lint and turn CI red without any code change; if that gets
+annoying the clippy step can be made advisory (`continue-on-error`) or the toolchain pinned.
+
+**Open questions / handoff:** needs Paul's go-ahead to commit and push; the first push to `main` is the first
+real run, so watch it and fix forward (a red macOS job is the thing to expect). Once it's green, a CI badge
+in the README is a natural follow-up. The same workflow could later dry-run the LTO + strip release profile
+(28 -> 16 MB) before it touches a real release.

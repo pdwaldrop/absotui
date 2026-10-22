@@ -1,0 +1,59 @@
+name: CI
+
+# Builds, tests and lints on every push to main and every pull request. Nothing else in
+# this repo runs the tests - release.yml only builds - so this is what catches a broken
+# change before it gets anywhere near a release.
+#
+# Pushes made with GITHUB_TOKEN (cut-release's version bump) don't trigger workflows, so
+# the bump commit itself isn't re-checked; it only changes the version number.
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch or PR makes the older run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  check:
+    name: build, test, clippy (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      # Let the other OS finish so one failure shows whether it's platform-specific.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --locked
+
+      - name: Test
+        run: cargo test --locked
+
+      # too_many_arguments is allowed: a handful of long-standing functions take many
+      # arguments by design (see the playback starters), and it isn't worth failing CI over.
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings -A clippy::too_many_arguments
