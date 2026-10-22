@@ -691,3 +691,38 @@ Multi-track books still re-download tracks that already finished if a later trac
 **Open questions / handoff:** Needs Paul's go-ahead to commit and push; suggest a patch
 release after the usual live check on his own setup. Remaining ideas from the earlier entry
 (inline podcast refresh, shared HTTP client, event-driven wakeups) are untouched.
+
+### 2026-10-22 — Claude Code (screen damage after the `d` key, uncommitted)
+
+**What changed:** `clear_message` (`src/utils/pop_up_message.rs`) now asks for a full
+repaint itself by setting `NEEDS_TERMINAL_CLEAR`, with one new unit test. Cause: Paul saw stray
+letters from the Library screen on Continue Listening (cells the app never repainted). I could
+not reproduce those exact letters (tmux, old and new build, three scenarios) and I can't say
+what triggered them - that tab ran in the desktop app's terminal panel, which was hidden and
+then resized after launch. While looking I found and reproduced a real, older bug of the same
+family: the status-line helpers write straight to the terminal, bypassing the drawing code's
+picture of the screen, and `clear_message` blanks the whole row 3 from the bottom - on Home with
+a player running that row is the Now Playing box's bottom border. The `d` (download) key
+popped "Downloading..." there and cleared it afterwards without asking for a repaint, so the
+border stayed blank until something else forced one. Playback start, `R` and a few others
+already set the flag; `d` (books and podcasts) did not. Fixing it in `clear_message` covers every
+caller, including any added later.
+
+**How it was verified:** `cargo build`, `cargo test` (101 passed) and `cargo clippy
+--all-targets` (only the 5 existing `too_many_arguments` warnings). Live against a fake server
+with a fresh scratch config per run, old v0.11.2 vs the fixed build, comparing the screen with a
+forced full repaint: pressing `d` while a book plays started a real download in 5/5 runs on both
+builds; the old build left one full border row blank in 5/5, the fixed build in 0/5. `R` still
+leaves a clean screen with no stuck "Refreshing..." message on both. The damage detector itself
+was checked by injecting two stray letters (it found both).
+
+**Not verified:** the stray `L`/`J` themselves (not reproduced); the desktop app's terminal panel
+(different emulator, not available to test); Paul's real terminal. A related risk is untouched:
+the background threads that print those messages can still interleave with a redraw in progress
+(never seen in testing). The ambiguous-width `⬇` download marker (plain U+2B07, no emoji
+selector) is a possible contributor in some terminals - also untested.
+
+**Open questions / handoff:** Needs Paul's go-ahead to commit and push (pairs naturally with the
+earlier commit as part of a patch release). If the stray letters come back in a normal terminal,
+get the exact keys pressed beforehand and re-test with the detector in the scratchpad approach
+(see memory: dev-environment-gotchas).

@@ -1,5 +1,5 @@
 use std::io::{Result, Stdout};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use crossterm::{
     execute,
     style::{Color, SetBackgroundColor},
@@ -15,6 +15,7 @@ use crossterm::{
 // (background `tokio::spawn`ed playback tasks - see `wait_prev_session_finished`)
 // set this flag instead, which the main render loop polls every iteration
 // alongside its other cross-task signals (see `poll_pod_ep_fetch` and friends).
+// `clear_message` sets it itself, so no caller can blank a row and forget the repaint.
 pub static NEEDS_TERMINAL_CLEAR: AtomicBool = AtomicBool::new(false);
 
 pub fn pop_message(stdout: &mut Stdout, lines_from_bottom: u16, message: &str) -> Result<()> {
@@ -38,6 +39,7 @@ pub fn pop_message(stdout: &mut Stdout, lines_from_bottom: u16, message: &str) -
 
 
 pub fn clear_message(stdout: &mut Stdout, lines_from_bottom: u16) -> Result<()> {
+    NEEDS_TERMINAL_CLEAR.store(true, Ordering::Relaxed);
     let (_cols, rows) = terminal::size()?;
     let target_row = rows.saturating_sub(lines_from_bottom);
 
@@ -49,4 +51,16 @@ pub fn clear_message(stdout: &mut Stdout, lines_from_bottom: u16) -> Result<()> 
     )?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clearing_a_message_requests_a_full_repaint() {
+        NEEDS_TERMINAL_CLEAR.store(false, Ordering::Relaxed);
+        let _ = clear_message(&mut std::io::stdout(), 3);
+        assert!(NEEDS_TERMINAL_CLEAR.load(Ordering::Relaxed));
+    }
 }
