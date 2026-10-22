@@ -1,6 +1,7 @@
 use crate::utils::http_client::api_client;
 use serde_json::Value;
 use reqwest::header::USER_AGENT;
+use std::time::Duration;
 
 const LOCAL_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -28,6 +29,7 @@ pub async fn get_latest_release_gh() -> Result<String, Box<dyn std::error::Error
     let response = client
         .get("https://api.github.com/repos/pdwaldrop/absotui/releases/latest")
         .header(USER_AGENT, "Absotui-Updater")
+        .timeout(Duration::from_secs(8))
         .send()
         .await?;
     let text = response.text().await?;

@@ -27,6 +27,45 @@ use crate::ui::player_tui;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+// A `List` builds and measures every item it is given, so with thousands of rows creating
+// them dominated the frame even though only a screenful is drawn. Every row is one line
+// tall, so the rows ratatui would draw can be worked out up front and only those built.
+// Mirrors List's own scrolling (keep the selection in view with the least movement).
+fn visible_window(len: usize, height: usize, offset: usize, selected: Option<usize>) -> (usize, usize) {
+    if len == 0 || height == 0 {
+        return (0, 0);
+    }
+    let mut start = offset.min(len - 1);
+    if let Some(selected) = selected.map(|s| s.min(len - 1)) {
+        if selected < start {
+            start = selected;
+        } else if selected >= start + height {
+            start = selected + 1 - height;
+        }
+    }
+    (start, (start + height).min(len))
+}
+
+fn render_windowed_list<'a>(
+    len: usize,
+    block: Block<'a>,
+    area: Rect,
+    buf: &mut Buffer,
+    state: &mut ListState,
+    build_item: impl Fn(usize) -> ListItem<'a>,
+    style_list: impl FnOnce(List<'a>) -> List<'a>,
+) {
+    let selected = if len == 0 { None } else { state.selected().map(|s| s.min(len - 1)) };
+    let (start, end) = visible_window(len, block.inner(area).height as usize, state.offset(), selected);
+    let list = style_list(List::new((start..end).map(build_item)).block(block));
+    let mut window_state = ListState::default()
+        .with_selected(selected.and_then(|s| s.checked_sub(start)).filter(|s| *s < end - start));
+    StatefulWidget::render(list, area, buf, &mut window_state);
+    // `select(None)` resets the offset, so the offset goes last.
+    state.select(selected);
+    *state.offset_mut() = start;
+}
+
 // Shared by both render_desc_settings (the preview shown while "Update/Uninstall" is
 // merely highlighted in the Settings list) and render_update_uninstall_content (the
 // Instructions stage once you've actually entered that screen) - one string so the two
@@ -982,109 +1021,120 @@ impl App {
         // their titles contain that word. Author comes from whichever of the two
         // author lists actually applies to the current library type (podcasts and
         // books each have their own, indexed the same way as titles_library).
-        let query = self.search_query.to_lowercase();
-        let idx_and_titles: Vec<(usize, String)> = self.titles_library
-            .iter()
-            .enumerate()
-            .filter(|(index, title)| {
-                let title_matches = title.to_lowercase().contains(&query);
-                let author_list = if self.is_podcast { &self.auth_names_library_pod } else { &self.auth_names_library };
-                let author_matches = author_list.get(*index).is_some_and(|author| author.to_lowercase().contains(&query));
-                title_matches || author_matches
-            })
-            .map(|(index, title)| (index, title.clone()))
-            .collect();
+        // The filter and the ~16 array gathers below only depend on the query and on whether the
+        // background episode prefetch has landed, so they are redone only when one of those
+        // changes - not on every frame the results are on screen.
+        let episodes_ready = self.pod_ep_receiver.is_none();
+        let filter_is_stale = self.search_filter_cache.as_ref()
+            .is_none_or(|(query, ready)| *query != self.search_query || *ready != episodes_ready);
+        if filter_is_stale {
+            let query = self.search_query.to_lowercase();
+            let idx_and_titles: Vec<(usize, String)> = self.titles_library
+                .iter()
+                .enumerate()
+                .filter(|(index, title)| {
+                    let title_matches = title.to_lowercase().contains(&query);
+                    let author_list = if self.is_podcast { &self.auth_names_library_pod } else { &self.auth_names_library };
+                    let author_matches = author_list.get(*index).is_some_and(|author| author.to_lowercase().contains(&query));
+                    title_matches || author_matches
+                })
+                .map(|(index, title)| (index, title.clone()))
+                .collect();
 
-        let mut titles_search_book_or_pod: Vec<String> = Vec::new();
-        let mut index_to_keep: Vec<usize> = Vec::new();
-        for (index, title) in idx_and_titles {
-            titles_search_book_or_pod.push(title);
-            index_to_keep.push(index);
+            let mut titles_search_book_or_pod: Vec<String> = Vec::new();
+            let mut index_to_keep: Vec<usize> = Vec::new();
+            for (index, title) in idx_and_titles {
+                titles_search_book_or_pod.push(title);
+                index_to_keep.push(index);
+            }
+
+
+            // Indexed gathers, not filter+contains scans: the old shape re-scanned
+            // `index_to_keep` for every one of the library's N items in each of the 16
+            // arrays below (O(N*M) per array, every frame) just to keep the same M
+            // indices. `index_to_keep` already holds exactly the indices to keep, in
+            // order, so index straight into the source arrays. The `all_*` arrays use
+            // `.get()` rather than `[]` because they're empty until the background
+            // episode fetch lands (bug_id 3f729c) - filtering then just yields nothing,
+            // same as before.
+            self.ids_search_book = index_to_keep
+                .iter()
+                .map(|&i| self.ids_library[i].clone())
+                .collect();
+            self.auth_names_pod_search_book = index_to_keep
+                .iter()
+                .map(|&i| self.auth_names_library_pod[i].clone())
+                .collect();
+            self.auth_names_search_book = index_to_keep
+                .iter()
+                .map(|&i| self.auth_names_library[i].clone())
+                .collect();
+            self.published_year_library_search_book = index_to_keep
+                .iter()
+                .map(|&i| self.published_year_library[i].clone())
+                .collect();
+            self.desc_library_search_book = index_to_keep
+                .iter()
+                .map(|&i| self.desc_library[i].clone())
+                .collect();
+            self.duration_library_search_book = index_to_keep
+                .iter()
+                .map(|&i| self.duration_library[i])
+                .collect();
+
+            self.all_titles_pod_ep_search = index_to_keep
+                .iter()
+                .filter_map(|&i| self.all_titles_pod_ep.get(i).cloned())
+                .collect();
+            self.all_ids_pod_ep_search = index_to_keep
+                .iter()
+                .filter_map(|&i| self.all_ids_pod_ep.get(i).cloned())
+                .collect();
+            self.all_subtitles_pod_ep_search = index_to_keep
+                .iter()
+                .filter_map(|&i| self.all_subtitles_pod_ep.get(i).cloned())
+                .collect();
+            self.all_seasons_pod_ep_search = index_to_keep
+                .iter()
+                .filter_map(|&i| self.all_seasons_pod_ep.get(i).cloned())
+                .collect();
+            self.all_episodes_pod_ep_search = index_to_keep
+                .iter()
+                .filter_map(|&i| self.all_episodes_pod_ep.get(i).cloned())
+                .collect();
+            self.all_authors_pod_ep_search = index_to_keep
+                .iter()
+                .filter_map(|&i| self.all_authors_pod_ep.get(i).cloned())
+                .collect();
+            self.all_descs_pod_ep_search = index_to_keep
+                .iter()
+                .filter_map(|&i| self.all_descs_pod_ep.get(i).cloned())
+                .collect();
+            self.all_titles_pod_search = index_to_keep
+                .iter()
+                .filter_map(|&i| self.all_titles_pod.get(i).cloned())
+                .collect();
+            self.all_durations_pod_ep_search = index_to_keep
+                .iter()
+                .filter_map(|&i| self.all_durations_pod_ep.get(i).cloned())
+                .collect();
+            self.ids_library_pod_search = index_to_keep
+                .iter()
+                .map(|&i| self.ids_library[i].clone())
+                .collect();
+            self.search_titles_cache = titles_search_book_or_pod;
+            self.search_filter_cache = Some((self.search_query.clone(), episodes_ready));
         }
-
-        let titles_search_book_or_pod: &[String] = &titles_search_book_or_pod;
-
-        // Indexed gathers, not filter+contains scans: the old shape re-scanned
-        // `index_to_keep` for every one of the library's N items in each of the 16
-        // arrays below (O(N*M) per array, every frame) just to keep the same M
-        // indices. `index_to_keep` already holds exactly the indices to keep, in
-        // order, so index straight into the source arrays. The `all_*` arrays use
-        // `.get()` rather than `[]` because they're empty until the background
-        // episode fetch lands (bug_id 3f729c) - filtering then just yields nothing,
-        // same as before.
-        self.ids_search_book = index_to_keep
-            .iter()
-            .map(|&i| self.ids_library[i].clone())
-            .collect();
-        self.auth_names_pod_search_book = index_to_keep
-            .iter()
-            .map(|&i| self.auth_names_library_pod[i].clone())
-            .collect();
-        self.auth_names_search_book = index_to_keep
-            .iter()
-            .map(|&i| self.auth_names_library[i].clone())
-            .collect();
-        self.published_year_library_search_book = index_to_keep
-            .iter()
-            .map(|&i| self.published_year_library[i].clone())
-            .collect();
-        self.desc_library_search_book = index_to_keep
-            .iter()
-            .map(|&i| self.desc_library[i].clone())
-            .collect();
-        self.duration_library_search_book = index_to_keep
-            .iter()
-            .map(|&i| self.duration_library[i])
-            .collect();
-
-        self.all_titles_pod_ep_search = index_to_keep
-            .iter()
-            .filter_map(|&i| self.all_titles_pod_ep.get(i).cloned())
-            .collect();
-        self.all_ids_pod_ep_search = index_to_keep
-            .iter()
-            .filter_map(|&i| self.all_ids_pod_ep.get(i).cloned())
-            .collect();
-        self.all_subtitles_pod_ep_search = index_to_keep
-            .iter()
-            .filter_map(|&i| self.all_subtitles_pod_ep.get(i).cloned())
-            .collect();
-        self.all_seasons_pod_ep_search = index_to_keep
-            .iter()
-            .filter_map(|&i| self.all_seasons_pod_ep.get(i).cloned())
-            .collect();
-        self.all_episodes_pod_ep_search = index_to_keep
-            .iter()
-            .filter_map(|&i| self.all_episodes_pod_ep.get(i).cloned())
-            .collect();
-        self.all_authors_pod_ep_search = index_to_keep
-            .iter()
-            .filter_map(|&i| self.all_authors_pod_ep.get(i).cloned())
-            .collect();
-        self.all_descs_pod_ep_search = index_to_keep
-            .iter()
-            .filter_map(|&i| self.all_descs_pod_ep.get(i).cloned())
-            .collect();
-        self.all_titles_pod_search = index_to_keep
-            .iter()
-            .filter_map(|&i| self.all_titles_pod.get(i).cloned())
-            .collect();
-        self.all_durations_pod_ep_search = index_to_keep
-            .iter()
-            .filter_map(|&i| self.all_durations_pod_ep.get(i).cloned())
-            .collect();
-        self.ids_library_pod_search = index_to_keep
-            .iter()
-            .map(|&i| self.ids_library[i].clone())
-            .collect();
+        let titles_search_book_or_pod = std::mem::take(&mut self.search_titles_cache);
 
         App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
         App::render_footer(footer_area, buf, &_text_render_footer);
-        self.render_list(list_area, buf, render_list_title, titles_search_book_or_pod, &mut self.list_state_search_results.clone(), None);
+        self.render_list(list_area, buf, render_list_title, &titles_search_book_or_pod, &mut self.list_state_search_results.clone(), None);
         if !titles_search_book_or_pod.is_empty() {
             self.render_info_search_book(item_area1, buf, &self.list_state_search_results.clone() );
             self.render_desc_search_book(item_area2, buf, &self.list_state_search_results.clone() );
         }
+        self.search_titles_cache = titles_search_book_or_pod;
         if self.is_search_active {
             self.render_search_overlay(item_area1, buf);
         }
@@ -1677,10 +1727,8 @@ impl App {
         }
         let scroll_offset = self.title_scroll_offset;
 
-        let items: Vec<ListItem> = render_list_items
-            .iter()
-            .enumerate()
-            .map(|(i, title)| {
+        let build_item = |i: usize| {
+                let title = &render_list_items[i];
                 match progress_info.and_then(|p| p.get(i)) {
                     Some((progress_text, percent, is_now_playing)) => {
                         // Line 1: now-playing marker (cobalt/progress-colored background) +
@@ -1750,17 +1798,12 @@ impl App {
                     }
                     None => ListItem::new(title.clone()),
                 }
-            })
-        .collect();
+            };
 
-
-        let list = List::new(items)
-            .block(block)
+        render_windowed_list(render_list_items.len(), block, area, buf, list_state, build_item, |list| list
             .highlight_style(selected_style)
             .highlight_symbol("▎")
-            .highlight_spacing(HighlightSpacing::Always);
-
-        StatefulWidget::render(list, area, buf, list_state);
+            .highlight_spacing(HighlightSpacing::Always));
     }
 
 
@@ -2233,7 +2276,12 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::App;
+    use super::{render_windowed_list, App};
+    use ratatui::{
+        buffer::Buffer,
+        layout::Rect,
+        widgets::{Block, Borders, HighlightSpacing, List, ListItem, ListState, StatefulWidget},
+    };
 
     #[test]
     fn footer_trailer_with_settings() {
@@ -2243,5 +2291,75 @@ mod tests {
     #[test]
     fn footer_trailer_without_settings() {
         assert_eq!(App::footer_trailer("Home", false), vec![("Tab", "Home"), ("?", "Keymap"), ("Q/Esc", "Quit")]);
+    }
+
+    fn plain_list_reference(len: usize, area: Rect, buf: &mut Buffer, state: &mut ListState) {
+        let list = List::new((0..len).map(|i| ListItem::new(format!("row {i}"))))
+            .block(Block::default().borders(Borders::ALL))
+            .highlight_symbol("▎")
+            .highlight_spacing(HighlightSpacing::Always);
+        StatefulWidget::render(list, area, buf, state);
+    }
+
+    fn windowed_list(len: usize, area: Rect, buf: &mut Buffer, state: &mut ListState) {
+        render_windowed_list(
+            len,
+            Block::default().borders(Borders::ALL),
+            area,
+            buf,
+            state,
+            |i| ListItem::new(format!("row {i}")),
+            |list| list.highlight_symbol("▎").highlight_spacing(HighlightSpacing::Always),
+        );
+    }
+
+    #[test]
+    fn windowed_list_draws_exactly_what_a_full_list_draws() {
+        let selections = [None, Some(0), Some(1), Some(2), Some(5), Some(9), Some(10), Some(29), Some(30), Some(31), Some(60), Some(99), Some(150)];
+        for len in [0usize, 1, 2, 3, 7, 10, 11, 30, 31, 100] {
+            for inner_height in [1usize, 2, 3, 5, 10, 29] {
+                for offset in [0usize, 1, 3, 9, 17, 60, 150] {
+                    for selected in selections {
+                        let area = Rect::new(0, 0, 24, (inner_height + 2) as u16);
+                        let (mut want_buf, mut got_buf) = (Buffer::empty(area), Buffer::empty(area));
+                        let mut want = ListState::default().with_offset(offset).with_selected(selected);
+                        let mut got = ListState::default().with_offset(offset).with_selected(selected);
+                        plain_list_reference(len, area, &mut want_buf, &mut want);
+                        windowed_list(len, area, &mut got_buf, &mut got);
+                        let case = format!("len={len} height={inner_height} offset={offset} selected={selected:?}");
+                        assert_eq!(got_buf, want_buf, "drawn rows differ: {case}");
+                        assert_eq!(got.offset(), want.offset(), "offset differs: {case}");
+                        assert_eq!(got.selected(), want.selected(), "selection differs: {case}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn windowed_list_scrolls_like_a_full_list_across_many_frames() {
+        let (len, inner_height) = (500usize, 12usize);
+        let area = Rect::new(0, 0, 24, (inner_height + 2) as u16);
+        let mut want = ListState::default();
+        let mut got = ListState::default();
+        let mut selected = 0usize;
+        let mut seed: u64 = 12345;
+        for frame in 0..3000 {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            selected = match (seed >> 33) % 6 {
+                0 => selected.saturating_sub(1),
+                1 | 2 => (selected + 1).min(len - 1),
+                3 => (selected + inner_height).min(len - 1),
+                4 => selected.saturating_sub(inner_height),
+                _ => ((seed >> 20) as usize) % len,
+            };
+            want.select(Some(selected));
+            got.select(Some(selected));
+            let (mut want_buf, mut got_buf) = (Buffer::empty(area), Buffer::empty(area));
+            plain_list_reference(len, area, &mut want_buf, &mut want);
+            windowed_list(len, area, &mut got_buf, &mut got);
+            assert_eq!(got_buf, want_buf, "drawn rows differ at frame {frame} (selected {selected})");
+            assert_eq!(got.offset(), want.offset(), "offset differs at frame {frame}");
+        }
     }
 }

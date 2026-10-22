@@ -7,8 +7,52 @@ use crate::db::database_struct::DownloadedTrack;
 use crate::utils::pop_up_message::pop_message;
 use std::io::stdout;
 use log::{info, error};
+use std::cell::RefCell;
 use std::env;
 use std::path::PathBuf;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
+
+struct CachedConnection {
+    path: PathBuf,
+    conn: Rc<Connection>,
+    file_checked_at: Instant,
+}
+
+// How often a reused connection re-checks that its database file still exists.
+#[cfg(not(test))]
+const FILE_CHECK_EVERY: Duration = Duration::from_secs(2);
+#[cfg(test)]
+const FILE_CHECK_EVERY: Duration = Duration::from_millis(50);
+
+thread_local! {
+    static CONNECTION: RefCell<Option<CachedConnection>> = const { RefCell::new(None) };
+}
+
+// One connection per thread, reused across calls: the render loop alone makes dozens of
+// these a second (player state, settings, a per-row "downloaded" check), and opening a
+// fresh connection and re-parsing the SQL for each was most of the idle CPU. Per thread
+// rather than shared so nested calls never block each other. Reopened if the file is
+// gone, so a deleted database is never written to through a stale handle.
+fn open_db(db_path: PathBuf) -> Result<Rc<Connection>> {
+    CONNECTION.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if let Some(cached) = slot.as_mut()
+            && cached.path == db_path
+            && (cached.file_checked_at.elapsed() < FILE_CHECK_EVERY || db_path.exists()) {
+            if cached.file_checked_at.elapsed() >= FILE_CHECK_EVERY {
+                cached.file_checked_at = Instant::now();
+            }
+            return Ok(cached.conn.clone());
+        }
+        let conn = Connection::open(&db_path)?;
+        let _ = conn.busy_timeout(Duration::from_millis(500));
+        conn.set_prepared_statement_cache_capacity(48);
+        let conn = Rc::new(conn);
+        *slot = Some(CachedConnection { path: db_path, conn: conn.clone(), file_checked_at: Instant::now() });
+        Ok(conn)
+    })
+}
 
 fn default_db_path() -> PathBuf {
     let config_home_path = env::var("XDG_CONFIG_HOME").map_or_else(|_| {
@@ -34,7 +78,7 @@ fn update_user_text_column(value: &str, username: &str, column: &str, log_tag: &
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
         conn.execute(
             &format!("UPDATE users SET {column} = ?1 WHERE username = ?2"),
             params![value, username],
@@ -51,12 +95,12 @@ fn update_user_text_column(value: &str, username: &str, column: &str, log_tag: &
 fn get_user_text_column(username: &str, column: &str) -> String {
     let db_path = default_db_path();
 
-    let conn = match Connection::open(db_path) {
+    let conn = match open_db(db_path) {
         Ok(c) => c,
         Err(_) => return String::from("Error: unable open database"),
     };
 
-    let mut stmt = match conn.prepare(&format!("SELECT {column} FROM users WHERE username = ?1")) {
+    let mut stmt = match conn.prepare_cached(&format!("SELECT {column} FROM users WHERE username = ?1")) {
         Ok(s) => s,
         Err(_) => return String::from("Error to prepare reqwest"),
     };
@@ -113,7 +157,7 @@ pub fn update_speed_rate(username: &str, is_speed_rate_up: bool) -> Result<()> {
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
 
         // Rounded to 1 decimal on every update - repeated float addition/subtraction of
         // 0.10 drifts (1.3 becomes 1.3000001, etc.), which otherwise shows up raw in the
@@ -143,12 +187,12 @@ pub fn update_speed_rate(username: &str, is_speed_rate_up: bool) -> Result<()> {
 pub fn get_speed_rate(username: &str) -> String {
     let db_path = default_db_path();
 
-    let conn = match Connection::open(db_path) {
+    let conn = match open_db(db_path) {
         Ok(c) => c,
         Err(_) => return String::from("Error: unable open database"),
     };
 
-    let mut stmt = match conn.prepare("SELECT speed_rate FROM users WHERE username = ?1") {
+    let mut stmt = match conn.prepare_cached("SELECT speed_rate FROM users WHERE username = ?1") {
         Ok(s) => s,
         Err(_) => return String::from("Error to prepare reqwest"),
     };
@@ -169,7 +213,7 @@ pub fn update_is_per_item_speed(value: &str, username: &str) -> Result<()> {
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
 
         conn.execute(
             "UPDATE users SET is_per_item_speed = ?1 WHERE username = ?2",
@@ -199,12 +243,12 @@ pub fn update_is_per_item_speed(value: &str, username: &str) -> Result<()> {
 pub fn get_is_per_item_speed(username: &str) -> String {
     let db_path = default_db_path();
 
-    let conn = match Connection::open(db_path) {
+    let conn = match open_db(db_path) {
         Ok(c) => c,
         Err(_) => return String::from("0"),
     };
 
-    let mut stmt = match conn.prepare("SELECT is_per_item_speed FROM users WHERE username = ?1") {
+    let mut stmt = match conn.prepare_cached("SELECT is_per_item_speed FROM users WHERE username = ?1") {
         Ok(s) => s,
         Err(_) => return String::from("0"),
     };
@@ -218,9 +262,9 @@ pub fn get_is_per_item_speed(username: &str) -> String {
 pub fn get_item_speed_rate(username: &str, id_item: &str) -> Option<f32> {
     let db_path = default_db_path();
 
-    let conn = Connection::open(db_path).ok()?;
+    let conn = open_db(db_path).ok()?;
 
-    let mut stmt = conn.prepare("SELECT speed_rate FROM item_speed_rate WHERE username = ?1 AND id_item = ?2").ok()?;
+    let mut stmt = conn.prepare_cached("SELECT speed_rate FROM item_speed_rate WHERE username = ?1 AND id_item = ?2").ok()?;
 
     stmt.query_row(params![username, id_item], |row| row.get::<_, f32>(0)).ok()
 }
@@ -234,7 +278,7 @@ pub fn set_item_speed_rate(username: &str, id_item: &str, value: f32) -> Result<
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
 
         conn.execute(
             "INSERT OR REPLACE INTO item_speed_rate (username, id_item, speed_rate) VALUES (?1, ?2, ?3)",
@@ -258,7 +302,7 @@ pub fn update_item_speed_rate(username: &str, id_item: &str, is_speed_rate_up: b
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
 
         // Rounded to 1 decimal on every update - see update_speed_rate's comment.
         if is_speed_rate_up {
@@ -294,7 +338,7 @@ pub fn insert_download(username: &str, id_item: &str, file_path: &str, duration:
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
         conn.execute(
             "INSERT OR REPLACE INTO downloads (username, id_item, file_path, duration, title, author, kind, tracks, chapters) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![username, id_item, file_path, duration, title, author, kind, tracks_json, chapters_json],
@@ -314,9 +358,9 @@ pub fn get_download(username: &str, id_item: &str) -> Option<DownloadedItem> {
 
     let db_path = default_db_path();
 
-    let conn = Connection::open(db_path).ok()?;
+    let conn = open_db(db_path).ok()?;
 
-    let mut stmt = conn.prepare("SELECT file_path, duration, title, author, tracks, chapters FROM downloads WHERE username = ?1 AND id_item = ?2").ok()?;
+    let mut stmt = conn.prepare_cached("SELECT file_path, duration, title, author, tracks, chapters FROM downloads WHERE username = ?1 AND id_item = ?2").ok()?;
 
     stmt.query_row(params![username, id_item], |row| {
         let file_path: String = row.get(0)?;
@@ -356,7 +400,7 @@ pub fn delete_download(username: &str, id_item: &str) -> Result<()> {
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
         conn.execute(
             "DELETE FROM downloads WHERE username = ?1 AND id_item = ?2",
             params![username, id_item],
@@ -378,9 +422,9 @@ pub fn list_downloaded_ids(username: &str, kind: &str) -> Result<Vec<String>> {
 
     let db_path = default_db_path();
 
-    let conn = Connection::open(db_path)?;
+    let conn = open_db(db_path)?;
 
-    let mut stmt = conn.prepare("SELECT id_item FROM downloads WHERE username = ?1 AND kind = ?2")?;
+    let mut stmt = conn.prepare_cached("SELECT id_item FROM downloads WHERE username = ?1 AND kind = ?2")?;
     let rows = stmt.query_map(params![username, kind], |row| row.get::<_, String>(0))?;
 
     let mut ids = Vec::new();
@@ -396,14 +440,14 @@ pub fn get_listening_session() -> Result<Option<ListeningSession>> {
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
         // Called ~5x/sec from the render loop (via player_info -> render_player) while
         // the detached playback task writes to this same row roughly every second from
         // its own connection - without a busy_timeout, a collision surfaces as an
         // immediate SQLITE_BUSY Err instead of a short, self-resolving wait, which
         // player_tui.rs then has no valid session data to render.
         let _ = conn.busy_timeout(std::time::Duration::from_millis(500));
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT id_session, id_item, current_time_playback, duration, is_finished, id_pod, elapsed_time, title, author, is_playback, chapter, chapters, volume, pending_seek
              FROM listening_session
              LIMIT 1",
@@ -458,7 +502,7 @@ pub fn insert_listening_session(
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
         conn.execute("DELETE FROM listening_session", params![])?;
         conn.execute(
             "INSERT INTO listening_session (id_session, id_item, current_time_playback, duration, is_finished, id_pod, elapsed_time, title, author, is_playback, chapter, chapters)
@@ -485,7 +529,7 @@ pub fn update_pending_seek(value: &str, id_session: &str) -> Result<()> {
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
 
         conn.execute(
             "UPDATE listening_session SET pending_seek = ?1 WHERE id_session = ?2",
@@ -510,7 +554,7 @@ pub fn update_volume_up(id_session: &str) -> Result<()> {
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
 
         conn.execute(
             "UPDATE listening_session SET volume = MIN(200, volume + 5) WHERE id_session = ?1",
@@ -531,7 +575,7 @@ pub fn update_volume_down(id_session: &str) -> Result<()> {
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
 
         conn.execute(
             "UPDATE listening_session SET volume = MAX(0, volume - 5) WHERE id_session = ?1",
@@ -551,7 +595,7 @@ pub fn update_is_playback(value: &str, id_session: &str) -> Result<()> {
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
 
         conn.execute(
             "UPDATE listening_session SET is_playback = ?1 WHERE id_session = ?2",
@@ -571,7 +615,7 @@ pub fn update_current_time(value: u32, id_session: &str) -> Result<()> {
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
 
         conn.execute(
             "UPDATE listening_session SET current_time_playback = ?1 WHERE id_session = ?2",
@@ -592,7 +636,7 @@ pub fn update_elapsed_time(value: u32, id_session: &str) -> Result<()> {
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
 
         conn.execute(
             "UPDATE listening_session SET elapsed_time = elapsed_time + ?1 WHERE id_session = ?2",
@@ -613,7 +657,7 @@ pub fn update_is_finished(value: &str, id_session: &str) -> Result<()> {
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
 
         conn.execute(
             "UPDATE listening_session SET is_finished = ?1 WHERE id_session = ?2",
@@ -634,7 +678,7 @@ pub fn delete_user(username: &str) -> Result<()> {
 
     let message = format!("User '{username}' deleted. Please restart the app to apply the changes.");
     let err_message = "Error connecting to the database.";
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
 
         let rows_deleted = conn.execute(
             "DELETE FROM users WHERE username = ?1",
@@ -661,7 +705,7 @@ pub fn update_is_loop_break(value: &str, username: &str) -> Result<()> {
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
 
         conn.execute(
             "UPDATE users SET is_loop_break = ?1 WHERE username = ?2",
@@ -688,7 +732,7 @@ pub fn update_is_loop_break(value: &str, username: &str) -> Result<()> {
 pub fn try_claim_playback_slot(username: &str) -> bool {
     let db_path = default_db_path();
 
-    let Ok(conn) = Connection::open(db_path) else {
+    let Ok(conn) = open_db(db_path) else {
         return false;
     };
     let _ = conn.busy_timeout(std::time::Duration::from_millis(500));
@@ -703,12 +747,12 @@ pub fn try_claim_playback_slot(username: &str) -> bool {
 pub fn get_is_loop_break(username: &str) -> String {
     let db_path = default_db_path();
 
-    let conn = match Connection::open(db_path) {
+    let conn = match open_db(db_path) {
         Ok(c) => c,
         Err(_) => return String::from("Error: unable open database"),
     };
 
-    let mut stmt = match conn.prepare("SELECT is_loop_break FROM users WHERE username = ?1") {
+    let mut stmt = match conn.prepare_cached("SELECT is_loop_break FROM users WHERE username = ?1") {
         Ok(s) => s,
         Err(_) => return String::from("Error to prepare reqwest"),
     };
@@ -725,7 +769,7 @@ pub fn update_is_vlc_launched_first_time(value: &str, username: &str) -> Result<
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
 
         conn.execute(
             "UPDATE users SET is_vlc_launched_first_time = ?1 WHERE username = ?2",
@@ -742,12 +786,12 @@ pub fn update_is_vlc_launched_first_time(value: &str, username: &str) -> Result<
 pub fn get_is_vlc_launched_first_time(username: &str) -> String {
     let db_path = default_db_path();
 
-    let conn = match Connection::open(db_path) {
+    let conn = match open_db(db_path) {
         Ok(c) => c,
         Err(_) => return String::from("Error: unable open database"),
     };
 
-    let mut stmt = match conn.prepare("SELECT is_vlc_launched_first_time FROM users WHERE username = ?1") {
+    let mut stmt = match conn.prepare_cached("SELECT is_vlc_launched_first_time FROM users WHERE username = ?1") {
         Ok(s) => s,
         Err(_) => return String::from("Error to prepare reqwest"),
     };
@@ -762,7 +806,7 @@ pub fn update_id_selected_lib(id_selected_lib: &str, username: &str) -> Result<(
     let db_path = default_db_path();
 
     let err_message = "Error connecting to the database.";
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
 
         conn.execute(
             "UPDATE users SET id_selected_lib = ?1 WHERE username = ?2",
@@ -784,7 +828,7 @@ pub fn update_server_address(server_address: &str, username: &str) -> Result<()>
     let db_path = default_db_path();
 
     let err_message = "Error connecting to the database.";
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
 
         conn.execute(
             "UPDATE users SET server_address = ?1 WHERE username = ?2",
@@ -809,7 +853,7 @@ pub fn update_user_tokens(username: &str, encrypted_access_token: &str, encrypte
     let db_path = default_db_path();
 
     let err_message = "Error connecting to the database.";
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
 
         conn.execute(
             "UPDATE users SET token = ?1, refresh_token = ?2 WHERE username = ?3",
@@ -827,7 +871,7 @@ pub fn update_user_tokens(username: &str, encrypted_access_token: &str, encrypte
 pub fn db_insert_usr(users : &Vec<User>)  -> Result<()> {   
     let db_path = default_db_path();
 
-    let conn = Connection::open(db_path)?;
+    let conn = open_db(db_path)?;
     for user in users {
         conn.execute(
             "INSERT OR REPLACE INTO users (username, server_address, token, is_default_usr, name_selected_lib, id_selected_lib, is_loop_break, is_vlc_launched_first_time, speed_rate, is_vlc_running, is_show_key_bindings, is_speed_adjusted_time, is_podcast_autoplay, is_per_item_speed, is_auto_download, refresh_token)
@@ -861,8 +905,8 @@ pub fn get_others() -> Result<Option<Others>> {
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
-        let mut stmt = conn.prepare(
+    if let Ok(conn) = open_db(db_path) {
+        let mut stmt = conn.prepare_cached(
             "SELECT login_err
              FROM others
              LIMIT 1",
@@ -890,7 +934,7 @@ pub fn update_login_err(value: &str) -> Result<()> {
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
         conn.execute(
             "INSERT INTO others (login_err) SELECT '' WHERE NOT EXISTS (SELECT 1 FROM others LIMIT 1)",
             [],
@@ -919,7 +963,7 @@ pub fn update_auth_in_progress(value: &str) -> Result<()> {
 
     let err_message = "Error connecting to the database.";
 
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = open_db(db_path) {
         conn.execute(
             "INSERT INTO others (login_err) SELECT '' WHERE NOT EXISTS (SELECT 1 FROM others LIMIT 1)",
             [],
@@ -943,12 +987,12 @@ pub fn get_auth_in_progress() -> String {
 
     let db_path = default_db_path();
 
-    let conn = match Connection::open(db_path) {
+    let conn = match open_db(db_path) {
         Ok(c) => c,
         Err(_) => return String::from("0"),
     };
 
-    let mut stmt = match conn.prepare("SELECT auth_in_progress FROM others LIMIT 1") {
+    let mut stmt = match conn.prepare_cached("SELECT auth_in_progress FROM others LIMIT 1") {
         Ok(s) => s,
         Err(_) => return String::from("0"),
     };
@@ -962,9 +1006,9 @@ pub fn get_auth_in_progress() -> String {
 pub fn select_default_usr() -> Result<Vec<String>> {
     let db_path = default_db_path();
 
-    let conn = Connection::open(db_path)?;
+    let conn = open_db(db_path)?;
 
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT username, server_address, token, is_default_usr, name_selected_lib, id_selected_lib, is_loop_break, is_vlc_launched_first_time, speed_rate, is_vlc_running, is_show_key_bindings, is_speed_adjusted_time, is_podcast_autoplay, is_per_item_speed, is_auto_download, refresh_token
          FROM users WHERE is_default_usr = 1 LIMIT 1"
     )?;
@@ -1025,7 +1069,7 @@ pub fn select_default_usr() -> Result<Vec<String>> {
 pub fn init_db() -> Result<()> {
     let db_path = default_db_path();
 
-    let conn = Connection::open(db_path)?;
+    let conn = open_db(db_path)?;
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS users (
@@ -1212,4 +1256,59 @@ pub fn init_db() -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
 
+    fn scratch_db(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("absotui-crud-test-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("db.sqlite3")
+    }
+
+    #[test]
+    fn the_same_path_reuses_one_connection_per_thread() {
+        let path = scratch_db("reuse");
+        let first = open_db(path.clone()).unwrap();
+        let second = open_db(path.clone()).unwrap();
+        assert!(Rc::ptr_eq(&first, &second));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_different_path_gets_its_own_connection() {
+        let a = scratch_db("path-a");
+        let b = scratch_db("path-b");
+        let first = open_db(a.clone()).unwrap();
+        let second = open_db(b.clone()).unwrap();
+        assert!(!Rc::ptr_eq(&first, &second));
+        let _ = std::fs::remove_dir_all(a.parent().unwrap());
+        let _ = std::fs::remove_dir_all(b.parent().unwrap());
+    }
+
+    #[test]
+    fn a_deleted_database_file_is_never_written_through_a_stale_handle() {
+        let path = scratch_db("deleted");
+        let first = open_db(path.clone()).unwrap();
+        first.execute("CREATE TABLE t (x INTEGER)", []).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::thread::sleep(FILE_CHECK_EVERY + Duration::from_millis(60));
+        let second = open_db(path.clone()).unwrap();
+        assert!(!Rc::ptr_eq(&first, &second));
+        assert!(path.exists(), "a fresh database file should have been created");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn repeated_queries_on_the_reused_connection_see_each_others_writes() {
+        let path = scratch_db("writes");
+        let conn = open_db(path.clone()).unwrap();
+        conn.execute("CREATE TABLE t (x INTEGER)", []).unwrap();
+        conn.execute("INSERT INTO t VALUES (7)", []).unwrap();
+        let again = open_db(path.clone()).unwrap();
+        let got: i64 = again.prepare_cached("SELECT x FROM t").unwrap().query_row([], |r| r.get(0)).unwrap();
+        assert_eq!(got, 7);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+}

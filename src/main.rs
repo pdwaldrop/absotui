@@ -192,6 +192,7 @@ async fn main() -> Result<()> {
             // Keeps the podcast "New & Unfinished" list from going stale without
             // requiring a manual refresh. The fetch runs in a background task (it takes
             // a request per episode); both calls are cheap no-ops most iterations.
+            app.poll_update_check();
             app.poll_podcast_home_refresh();
             app.refresh_podcast_home_if_stale();
 

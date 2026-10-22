@@ -72,4 +72,4 @@ pub fn download_client() -> Client {
 /// Always fan out with `futures::stream::...buffered()`, never `buffer_unordered()`:
 /// callers feed results straight into index-aligned parallel arrays, which silently
 /// desync if results come back in completion order instead of request order.
-pub const MAX_CONCURRENT_REQUESTS: usize = 8;
+pub const MAX_CONCURRENT_REQUESTS: usize = 12;

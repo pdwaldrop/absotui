@@ -815,3 +815,112 @@ real terminal, macOS.
 
 **Open questions / handoff:** needs Paul's go-ahead to commit and push; a patch release would
 need a changelog entry first (none written for these).
+
+### 2026-10-22 — Claude Code (optimization scrub, uncommitted)
+
+**What changed:** Paul asked for a full scrub for optimization before the next release. Measured
+first (stack sampling of the running binary, a counter on database opens, scaling runs on 180 to
+4,000 item libraries, startup timelines against a 110 ms server), then fixed what the numbers
+showed. All uncommitted.
+1. *Database (the big one):* every `crud.rs` call opened a new SQLite connection and re-parsed its
+   SQL. The frame path made 57 opens/s on Home, 78/s while playing (per-row "downloaded" check,
+   settings and player state read several times a frame, the loop's own reads), and SQLite was 70-80%
+   of idle CPU. `open_db` now reuses one connection per thread (no locks, so nested calls cannot
+   deadlock), caches prepared statements, sets a 500 ms busy timeout on every connection, and
+   re-checks the file still exists every 2 s so a deleted database is never written through a stale
+   handle (`src/db/crud.rs`).
+2. *Startup no longer waits on GitHub:* the update check sat inside the startup `join!`, so the first
+   screen waited for it. With github.com unreachable (reproduced with a proxy that accepts and never
+   answers) v0.11.2 took 10.1 s to show anything; now 0.2 s. It runs in a spawned task, the banner
+   appears when the answer lands (`poll_update_check`), with its own 8 s timeout (`src/app.rs`,
+   `src/utils/check_update.rs`).
+3. *Startup round trips:* the clock-sync ping runs alongside the libraries request instead of
+   before it (the server's 401 still triggers renew-and-retry if the clock is off, checked with a
+   server whose clock is +65 min), and the request concurrency cap went 8 -> 12 so ten progress
+   lookups fit in one wave. First screen on a 110 ms server: 0.65 s -> 0.45 s (book library).
+4. *Long lists build only the rows on screen* (`render_windowed_list` in `src/ui/tui.rs`): `render_list`
+   built a `ListItem` for every row every frame (4,000 books = 4,000 strings and lines per frame).
+   Checked against ratatui's own `List` across 5,460 length/height/offset/selection combinations and
+   a 3,000-frame random scroll (identical drawn rows, offset and selection) - the check caught an
+   ordering bug in my first version.
+5. *Search results:* the filter and ~16 array clones ran every frame while results were on screen;
+   now recomputed only when the query changes or the episode prefetch lands.
+6. *Covers:* an HTTP error is no longer cached as if it were the image. (A first version also asked for
+   `?width=600`; the real server showed that was wrong - see the real-account test below - and it was
+   reverted before commit.)
+7. *Progress sent as strings (found on the real account):* `sync_session` (the playback sync, every few
+   seconds) sent `currentTime` and `timeListened` as JSON strings. The server stores what it is sent, so
+   progress lookups later returned `"currentTime":"623"` and the app's own parser failed on it
+   (`invalid type: string "623", expected f64`) and silently treated that episode as unfinished. Now the
+   body sends numbers (`src/api/sessions/sync_open_session.rs`), and the progress parser accepts a number,
+   a numeric string or null for `progress`/`currentTime`/`duration`, so records already stored as strings
+   read correctly (`src/api/me/get_media_progress.rs`).
+
+**Measured (idle CPU, v0.11.2 -> now, same moment, same machine):** Home 4.5% -> 1.1%; Home while
+playing 6.1% -> 1.7%; Library 180 items 1.7% -> 0.9%; Library 4,000 items 3.3% -> 1.2%; search
+results 4,000 items 6.7% -> 0.8%; podcast Home 7.3% -> 1.5%. Memory unchanged (about 21-28 MB).
+Also: 30 queued keys 8.2 -> ~38 keys/s with the earlier loop change; connections for a podcast
+refresh run 107 -> 13.
+
+**How it was verified:** `cargo build`, `cargo test` (113 passed; new: connection reuse and
+deleted-file reopen, the windowed-list comparisons), `cargo clippy --all-targets` (only the 5
+existing `too_many_arguments` warnings). Live against the fake server with scratch config, old vs
+new, plus a re-run on the final binary of: the `d`-key border fix, the 502 refresh case (login kept),
+Auto Download (9 downloads, 9 files byte-verified, 30 MB peak), podcast refresh stalls (none),
+log rotation, the missing-key message, address trimming, search results across several queries and
+scrolling, play start (2.5 -> 1.55 s).
+
+**Considered, measured, not changed:** a release profile with thin LTO + one codegen unit + stripped
+symbols gives a 42% smaller binary (28.1 -> 16.2 MB) and ~3 MB less memory but no speed change
+(first screen 156 vs 155 ms) and strips backtrace symbols; it also changes the CI release build, which
+can't be tested locally, so it's left as a decision for a release with a CI dry run. Skipping redraws
+when nothing changed would cut the remaining ~1% idle CPU but risks stale-screen bugs. A single
+`/api/me` call instead of one progress request per episode would cut requests but pulls the whole
+progress history each time.
+
+**Real-account test (2026-10-22, Paul authorized it; read-only keys only, nothing playing, both of his
+other instances closed first; database backed up; real config used in place):** the account's selected
+library is the podcast one (`Podcasts-SUPERHOME`, 22 shows). New build vs installed v0.11.3, two launches
+each: first screen 0.85/1.46 s vs 1.91/1.81 s; Home idle CPU 1.4% vs 5.4%; key latency while the list
+refreshes median 40 ms with 0 of 160 keys over 300 ms vs median 42 ms with 5 of ~150 over 300 ms (max 870 ms);
+Library idle 1.0% vs 3.9%; memory 30 vs 34 MB; clean quit 0.2 vs 0.5 s; no player started; no new errors.
+Home, Library (22 items, scrolling) and search ("the": 10 matches by title or author) were read on screen and
+render correctly. Server is Audiobookshelf 2.37.1 (HTTP/2; fresh connection 112-196 ms, reused ~79 ms).
+Findings: (a) the server already serves covers as 400 px WebP by default, so the `?width=600` request made
+them 3x larger (47 KB vs 14 KB) for nothing - reverted; my "huge original cover" worry came from the fake
+server and does not apply to real Audiobookshelf; (b) the string-typed progress bug in item 7; (c) the new
+log rotation moved the 54 MB log aside as `absotui.log.old` on first launch (Paul can delete it).
+Afterwards: integrity check ok, 1 user, 9 download rows identical to baseline, 22 download files and no
+`.part` files, one cover added, only the normal flag changes (`is_vlc_running` 1 -> 0 after the stale session was
+recovered at startup, `is_vlc_launched_first_time` set). The startup recovery closed the session his closed
+player had left open and synced that episode (his own last position), as any launch does.
+
+**Real playback test (same day, Paul asked for it; mpv backend, first episode in New & Unfinished, ~13 s per
+run, new build x2 and installed v0.11.3 x2, tmux screen capture + process list + database + log):** the
+whole path works on the real account with both builds - server session started, mpv launched from the local
+copy, player bar and moving position shown, `X` stopped it, mpv exited, `is_vlc_running` reset, session
+closed on the server, clean `Q` quit in 0.2-0.4 s, no errors or warnings from the new build.
+Findings: (a) with the machine's real audio output (PipeWire; default sink is a Bluetooth headset) mpv's own
+clock advances ~1.5 s and then freezes - reproduced with plain mpv at volume 0, no absotui involved - so
+the first two runs recorded only +2 s; with `ao=null` (a throwaway `MPV_HOME`, Paul's mpv config untouched)
+playback advances normally. Environmental (headset asleep/not connected as audio), not an app bug; worth
+telling Paul. (b) Play start on mpv is the same in both builds (player bar 0.83 vs 0.89 s, moving position
+1.87 vs 1.93 s): mpv reports its position immediately, so the faster loading poll helps VLC only (the 2.5 -> 1.6 s
+figure was VLC against the fake server). (c) A/B on the real server proved the string bug end to end: after the
+new build's session the installed build read the episode's progress without error; 13 s into the installed
+build's own playback its progress lookup failed with `invalid type: string`, i.e. the old `sync_session`
+wrote the string and the new one writes numbers.
+Side effects of the tests on the account (disclosed to Paul): that episode's saved position moved from 0 to 46 s
+(it was unplayed), a few tens of seconds of listening time were added, and its stored `currentTime` is
+currently string-typed again because the installed (old) build's sync was the last writer - the new build
+reads it fine and overwrites it with a number on its next sync. Offered: a silent play + seek back to reset it.
+
+**Not verified:** audible playback (the headset stalls the clock), VLC on the real account, macOS, and
+book-library views on the real account (his selected library is the podcast one).
+Throwaway worktree, build directories, the database backup copy and the temporary mpv config were deleted.
+
+**Open questions / handoff:** needs Paul's go-ahead to commit and push; a patch release would need a
+changelog entry (none written for the 2026-10-22 work after v0.11.3). Still open from earlier entries:
+event-driven wakeups, big-cover decode off the UI thread (the 600 px request mostly avoids it), the
+first keypress swallowed by terminals that never answer the image query, and a few stray prints on
+rare failure paths.

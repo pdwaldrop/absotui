@@ -64,7 +64,7 @@ Thin `reqwest` + `serde` wrappers around the Audiobookshelf API, one file per en
 
 ### `src/db/` - sqlite as settings/state store, not a relational model
 
-`rusqlite` (bundled), used for durable per-user settings (one row per user, columns like `is_podcast_autoplay`, `speed_rate`) and the single current `listening_session` row - not a general data model. Every function in `crud.rs` opens its own connection and runs synchronously (blocking) even though it's called from async code; there's no `spawn_blocking` wrapping it.
+`rusqlite` (bundled), used for durable per-user settings (one row per user, columns like `is_podcast_autoplay`, `speed_rate`) and the single current `listening_session` row - not a general data model. Every function in `crud.rs` goes through `open_db`, which reuses one connection per thread (and its cached prepared statements) rather than opening a fresh one per call - the render loop makes dozens of these a second, so opening each time was most of the idle CPU. They run synchronously (blocking) even though they're called from async code; there's no `spawn_blocking` wrapping it. Since the playback task and the UI share state only through this database, keep per-frame reads cheap.
 
 ### `src/player/` - VLC or mpv behind one `Player` enum, no library binding
 

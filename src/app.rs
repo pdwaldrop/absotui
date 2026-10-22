@@ -259,6 +259,9 @@ pub struct App {
     // than a separate `Terminal` instance racing the main loop's own. `TextArea` owns
     // its own text/cursor state, so it lives on `App` for as long as the box is open.
     pub is_search_active: bool,
+    // Search results are recomputed only when the query (or the episode prefetch) changes.
+    pub(crate) search_filter_cache: Option<(String, bool)>,
+    pub(crate) search_titles_cache: Vec<String>,
     pub search_textarea: ratatui_textarea::TextArea<'static>,
     pub is_podcast: bool,
     // Set only while the background fetch spawned in `App::new()` is still in flight -
@@ -354,6 +357,7 @@ pub struct App {
     pub config: ConfigFile,
     pub changelog: String,
     pub update_msg: String,
+    update_receiver: Option<tokio::sync::oneshot::Receiver<Option<String>>>,
     pub update_uninstall_stage: UpdateUninstallStage,
     pub update_uninstall_password: TextArea<'static>,
     pub update_uninstall_log: Vec<String>,
@@ -752,9 +756,15 @@ impl App {
             }
         }
 
-        // Expiry is the server's clock, so learn how far this computer's is from it first -
-        // see refresh_token.rs's CLOCK_OFFSET_SECS.
-        sync_clock_with_server(&server_address).await;
+        // Expiry is the server's clock, so learn how far this computer's is from it - see
+        // refresh_token.rs's CLOCK_OFFSET_SECS. Runs alongside the requests below instead
+        // of ahead of them (one round trip off the first screen); if the clock is off and
+        // an expired token still looks valid until the offset lands, the server's 401
+        // below triggers the same renew-and-retry.
+        let clock_sync = tokio::spawn({
+            let server_address = server_address.clone();
+            async move { sync_clock_with_server(&server_address).await }
+        });
 
         // Proactively refresh before the very first API call below - otherwise any
         // access token that already expired while the app wasn't running (they last
@@ -774,6 +784,7 @@ impl App {
 
         let had_refresh_token = !refresh_token.is_empty();
         let mut libraries_result = get_all_libraries(&token, server_address.clone()).await;
+        let _ = clock_sync.await;
         // The server rejected a token that looked fine (whatever the reason - the clock,
         // a session it dropped): renew it once and retry before giving up on the login.
         // Any other refresh outcome falls through to the diagnosis below untouched.
@@ -909,15 +920,19 @@ impl App {
     };
 
     // See UPDATE_CHECK's doc comment - only actually hits GitHub the first time this
-    // process calls it, cloning the cached result every time after.
-    let update_fut = async {
-        match UPDATE_CHECK.get() {
-            Some(cached) => cached.clone(),
-            None => {
+    // process calls it, cloning the cached result every time after. Run in the background
+    // and applied by `poll_update_check`: the banner is cosmetic, so a slow or unreachable
+    // github.com must never hold up the first screen.
+    let (update_msg, update_receiver) = match UPDATE_CHECK.get() {
+        Some(cached) => (cached.clone().unwrap_or_default(), None),
+        None => {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            tokio::spawn(async move {
                 let result = check_update().await;
                 let _ = UPDATE_CHECK.set(result.clone());
-                result
-            }
+                let _ = tx.send(result);
+            });
+            (String::new(), Some(rx))
         }
     };
 
@@ -931,16 +946,14 @@ impl App {
         }
     };
 
-    let (home_res, all_books_res, update_res, collections_res, listening_stats_res) = tokio::join!(
+    let (home_res, all_books_res, collections_res, listening_stats_res) = tokio::join!(
         home_fut,
         get_all_books(&token, &id_selected_lib, server_address.clone()),
-        update_fut,
         collections_fut,
         get_listening_stats(&token, server_address.clone()),
     );
     home_res?;
     let all_books = all_books_res?;
-    let update_msg = update_res.unwrap_or_default();
     // A failed collections fetch just means the Collections ring stop doesn't
     // appear this session, not a hard startup failure like `all_books` above.
     let all_collections = collections_res.unwrap_or_default();
@@ -1178,6 +1191,8 @@ impl App {
         stats_summary,
         ids_search_book,
         is_search_active,
+        search_filter_cache: None,
+        search_titles_cache: Vec::new(),
         search_textarea: ratatui_textarea::TextArea::default(),
         search_query,
         is_podcast,
@@ -1265,6 +1280,7 @@ impl App {
         config,
         changelog,
         update_msg,
+        update_receiver,
         update_uninstall_stage: UpdateUninstallStage::Instructions,
         update_uninstall_password: TextArea::default(),
         update_uninstall_log: Vec::new(),
@@ -1338,6 +1354,20 @@ impl App {
             let _ = tx.send(fetch_podcast_home_data(&token, server_address, &id_selected_lib, newest_first, &username).await);
         });
         self.podcast_home_receiver = Some(rx);
+    }
+
+    // Non-blocking check for the GitHub update check spawned in App::new() - called from
+    // main.rs's render loop every iteration; a no-op once the answer has been taken.
+    pub fn poll_update_check(&mut self) {
+        let Some(rx) = self.update_receiver.as_mut() else { return };
+        match rx.try_recv() {
+            Ok(result) => {
+                self.update_msg = result.unwrap_or_default();
+                self.update_receiver = None;
+            }
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed) => self.update_receiver = None,
+        }
     }
 
     // Non-blocking check for the refresh spawned above - called from main.rs's render
