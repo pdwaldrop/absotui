@@ -1350,8 +1350,7 @@ let changelog_81 = "Changelog Absotui v0.11.2 (21/10/2026) \n\
          \n\
          Enjoy!\n
          ####\n".to_string();
-let changelog_82 = format!(
-    "Changelog Absotui v{VERSION} (22/10/2026) \n\
+let changelog_82 = "Changelog Absotui v0.11.3 (22/10/2026) \n\
          \n\
          Fixed:\n\
          - Auto Download could download the same episodes again and again,\n\
@@ -1379,10 +1378,53 @@ let changelog_82 = format!(
            while it loads.\n\
          \n\
          Enjoy!\n
+         ####\n".to_string();
+let changelog_83 = format!(
+    "Changelog Absotui v{VERSION} (22/10/2026) \n\
+         \n\
+         Fixed:\n\
+         - Listening progress could end up unreadable. While you listened,\n\
+           Absotui sent your position to the server as text instead of a\n\
+           number, the server kept it that way, and Absotui then couldn't\n\
+           read that episode's progress back and treated it as unfinished.\n\
+           It now sends numbers, and it reads progress the server already\n\
+           holds as text.\n\
+         - A hiccup on the server's side (a 502 or 503 from a proxy, say)\n\
+           while renewing your login no longer deletes your saved login\n\
+           and sends you back to the login screen. That only happens when\n\
+           the server really rejects it, and a failed renewal is tried\n\
+           again at most every 15 seconds instead of every moment.\n\
+         - Startup no longer waits for GitHub. If your computer can't\n\
+           reach github.com, the first screen used to wait ten seconds or\n\
+           more for the update check; it now runs in the background.\n\
+         - Podcast Home no longer freezes for a moment every few seconds\n\
+           while the list refreshes.\n\
+         - A server address typed with a trailing slash or spaces now\n\
+           works.\n\
+         - The message shown when the secret key is missing is now one\n\
+           clean message, and it says to restart Absotui.\n\
+         - A failed cover download was saved as if it were the picture.\n\
+         \n\
+         Changed:\n\
+         - Much lighter on the CPU while it sits open - roughly a quarter\n\
+           or less of before (Home 4.5% to 1.1%, while playing 6% to\n\
+           1.7%). Absotui was opening its settings database dozens of\n\
+           times a second.\n\
+         - Big libraries stay light. Library and search results used to\n\
+           cost more the more books you had; with thousands of books they\n\
+           now cost about the same as with a few hundred.\n\
+         - Starts faster: the first screen comes up about half a second\n\
+           sooner on a typical server.\n\
+         - The log file is rotated at 5 MB (the previous one is kept as\n\
+           absotui.log.old) and no longer fills up with a line per\n\
+           episode.\n\
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_83);
     changelog.push_str(&changelog_82);
     changelog.push_str(&changelog_81);
     changelog.push_str(&changelog_80);
