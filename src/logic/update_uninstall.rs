@@ -45,13 +45,16 @@ async fn run(action: Action, mut password_rx: UnboundedReceiver<String>, tx: Unb
         Ok(()) => {
             info!("[update_uninstall] {action:?} finished successfully");
             let _ = tx.send(ProgressEvent::Finished(Ok(())));
+            crate::utils::wake::wake_main_loop();
         }
         Err(UpdateError::AuthFailed) => {
             let _ = tx.send(ProgressEvent::AuthFailed);
+            crate::utils::wake::wake_main_loop();
         }
         Err(UpdateError::Other(e)) => {
             error!("[update_uninstall] {action:?} failed: {e}");
             let _ = tx.send(ProgressEvent::Finished(Err(e)));
+            crate::utils::wake::wake_main_loop();
         }
     }
 }
@@ -181,6 +184,7 @@ async fn negotiate(
                 saw_prompt = true;
                 progressed_since_prompt = false;
                 let _ = tx.send(ProgressEvent::NeedPassword);
+                crate::utils::wake::wake_main_loop();
                 match password_rx.recv().await {
                     Some(password) => {
                         partial.clear();
@@ -258,6 +262,7 @@ async fn read_until_idle_or_eof(
                             if !line.trim().is_empty() {
                                 *progressed_since_prompt = true;
                                 let _ = tx.send(ProgressEvent::Line(line.to_string()));
+                                crate::utils::wake::wake_main_loop();
                             }
                         }
                     }

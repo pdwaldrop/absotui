@@ -48,6 +48,9 @@ fn open_db(db_path: PathBuf) -> Result<Rc<Connection>> {
         let conn = Connection::open(&db_path)?;
         let _ = conn.busy_timeout(Duration::from_millis(500));
         conn.set_prepared_statement_cache_capacity(48);
+        // The playback task and the UI share state only through this database, so any write
+        // (a new position, a started session, a finished download) is a reason to redraw.
+        let _ = conn.update_hook(Some(|_, _: &str, _: &str, _| crate::utils::wake::wake_main_loop()));
         let conn = Rc::new(conn);
         *slot = Some(CachedConnection { path: db_path, conn: conn.clone(), file_checked_at: Instant::now() });
         Ok(conn)
@@ -1297,6 +1300,20 @@ mod tests {
         let second = open_db(path.clone()).unwrap();
         assert!(!Rc::ptr_eq(&first, &second));
         assert!(path.exists(), "a fresh database file should have been created");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    // The wake signal is process-wide and other tests write to databases too, so this only
+    // checks the positive direction: after the pending signal is drained, a write on a
+    // connection from `open_db` has to produce one.
+    #[tokio::test]
+    async fn a_database_write_wakes_the_main_loop() {
+        let path = scratch_db("wake");
+        let conn = open_db(path.clone()).unwrap();
+        conn.execute("CREATE TABLE t (x INTEGER)", []).unwrap();
+        let _ = tokio::time::timeout(Duration::from_millis(50), crate::utils::wake::woken()).await;
+        conn.execute("INSERT INTO t VALUES (1)", []).unwrap();
+        tokio::time::timeout(Duration::from_millis(500), crate::utils::wake::woken()).await.expect("a write should wake the loop");
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

@@ -1033,3 +1033,48 @@ tree was reverted to HEAD and rebuilt; 118 tests pass.
 ignore it. Test setups with a detached tmux session (or any pty with nothing answering) will always show the 2 s
 wait and the lost first key; that is the harness, not tmux. Remaining open ideas from earlier entries are
 unchanged (event-driven wakeups, central status-message channel, the LTO release profile).
+
+### 2026-10-22 — Claude Code (event-driven main loop)
+
+**What changed:** The main loop no longer sleeps and polls. It now waits for whichever comes first: a keypress or
+resize (crossterm's `EventStream`), a wake-up from a background task, or a 250 ms tick for the things nothing
+signals (title scroll, periodic refresh checks). Wake-ups come from a new `src/utils/wake.rs`
+(`wake_main_loop()`); every SQLite write through `open_db` fires it (the `hooks` feature's `update_hook`), and
+the places that hand results to the UI another way call it directly (update check, podcast fetch/add/remove
+results, update/uninstall progress, cover cache writes, `clear_message`). Visible effect: a cover or the player
+bar shows up the moment it is ready instead of at the next tick. Two things I had to get right along the way:
+(1) `Terminal::clear()` asks the terminal for the cursor position, which blocks on the same reader the event
+stream owns - the player bar took ~3 s to appear until I replaced both calls with `clear_screen` (clear + reset
+the diff buffers; the cursor is hidden anyway). (2) `tokio::select!` picks randomly when a key and a wake are both
+ready, which made a burst of queued keys about 15% slower; it is `biased` toward keys now. The `R` reload drops the
+event stream around the recovery screen (that screen reads the terminal itself) and rebuilds it after.
+CLAUDE.md's main-loop paragraph is updated with the rule for future code.
+
+**Files:** `src/main.rs`, `src/utils/wake.rs` (new), `src/utils/mod.rs`, `src/db/crud.rs`, `src/app.rs`,
+`src/logic/update_uninstall.rs`, `src/utils/cover_cache.rs`, `src/utils/pop_up_message.rs`, `Cargo.toml`/`Cargo.lock`
+(crossterm `event-stream`, rusqlite `hooks`), `CLAUDE.md`.
+
+**How it was verified:** `cargo test` 122 passed (three runs in a row, stable), `cargo clippy --locked
+--all-targets -- -D warnings -A clippy::too_many_arguments` clean. Release build against a fake Audiobookshelf,
+alternating with the installed v0.11.4 at the same moment on a quiet machine: new cover after selecting an item
+264 -> 13 ms; player bar after pressing play 265 -> 123 ms; terminal resize unchanged (14 ms both); a single
+keypress to first output unchanged (1 ms); 30 queued keypresses fully applied 0.74 s (old) vs 0.71 s (new),
+median of 8 alternating runs; idle CPU about the same as before (home 0.5-1.3% vs 1.2-1.3%, playing 0.9-1.8% vs
+1.6%, library 0.6-0.9% vs 0.7-1.0%) - so no busy loop, but also no real idle saving (it was already low). In a real
+tmux client over a pty answering like Ghostty: server down, `R` -> recovery screen appears, `A` opens the address
+editor and `Esc` leaves it (keys reach the recovery screen), server back, `r` -> recovers, keys work afterwards;
+plain `R` with the server up reloads and keys still work; server down, `R`, `Esc` keeps the current data and keys
+work; search typing (including a capital `R`, which must not trigger a reload) and `Esc`; `Q` quits at once.
+Playback through VLC on the fake server: play, position advancing, pause (frozen), resume, stop - same as v0.11.4.
+The earlier `d`-key screen-damage check still passes (old build damaged 3/3, this one 0/3).
+
+**Not verified:** against Paul's real server or account (his app was not running; I did not start one against his
+config for this change), in Ghostty itself, on macOS (crossterm reads the terminal differently there), and in a
+long real playback session. Everything above is a fake server plus a pty, with timings from a machine that was
+noisy earlier in the session - only same-moment A/B numbers are quoted.
+
+**Open questions / handoff:** Not committed - waiting on Paul's go-ahead. No changelog entry; that belongs to the
+release that ships this (it would be a user-visible "feels snappier" note, not a fix). Rule for anyone touching
+the loop: while the event stream exists, `event::read`/`poll`, `cursor::position` and `Terminal::clear` block - drop
+the stream first or use `clear_screen`. Remaining ideas from earlier entries: central status-message channel,
+LTO/strip release profile.

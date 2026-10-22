@@ -42,6 +42,7 @@ pub fn pop_message(stdout: &mut Stdout, lines_from_bottom: u16, message: &str) -
 
 pub fn clear_message(stdout: &mut Stdout, lines_from_bottom: u16) -> Result<()> {
     NEEDS_TERMINAL_CLEAR.store(true, Ordering::Relaxed);
+    crate::utils::wake::wake_main_loop();
     let (_cols, rows) = terminal::size()?;
     let target_row = rows.saturating_sub(lines_from_bottom);
 

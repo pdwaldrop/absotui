@@ -13,7 +13,9 @@ use app::App;
 use crate::db::database_struct::Database;
 use color_eyre::Result;
 use std::time::Duration;
-use crossterm::event::{self, KeyCode};
+use crossterm::event::{self, EventStream, KeyCode};
+use futures::StreamExt;
+use ratatui::backend::{Backend, ClearType};
 use std::io::stdout;
 use crate::utils::pop_up_message::{clear_message, pop_message, NEEDS_TERMINAL_CLEAR};
 use std::sync::atomic::Ordering;
@@ -147,6 +149,10 @@ async fn main() -> Result<()> {
         // that name when the window title itself is blank.
         let mut last_window_title: Option<String> = None;
 
+        // Created only now: the recovery screen (init_app_with_retry) reads the terminal
+        // itself, and two readers would split the keystrokes between them.
+        let mut events = EventStream::new();
+
         loop {
 
             let is_playing = get_is_vlc_running(app.username.as_str());
@@ -172,7 +178,7 @@ async fn main() -> Result<()> {
             // it after `draw` left the screen visibly blank for up to ~250ms on every
             // playback start (confirmed live: a full-screen flash on every "l"/Enter).
             if NEEDS_TERMINAL_CLEAR.swap(false, Ordering::Relaxed) {
-                let _ = terminal.clear();
+                clear_screen(&mut terminal);
             }
 
             terminal.draw(|frame| {
@@ -264,29 +270,49 @@ async fn main() -> Result<()> {
                 }
             }
 
-            if crossterm::event::poll(Duration::from_millis(250))?
-                && let event::Event::Key(key) = crossterm::event::read()? {
-                    app.handle_key(key);
-                    // 'R' just arms the same library_needs_reload flag a Settings >
-                    // Library switch (or a podcast add/remove finishing - see
-                    // poll_podcast_add_result/poll_podcast_remove_result) already uses,
-                    // rather than reinit-ing inline here - the unconditional check below
-                    // is what actually reloads, since it runs every tick regardless of
-                    // whether a key was just pressed. Reloads triggered from a background
-                    // poll (podcast add/remove) resolve between keystrokes, not on one -
-                    // gating the reload on "a key was just pressed" left them sitting
-                    // there, reload pending, until the user happened to press anything.
-                    //
-                    // Gated on is_capturing_free_text: this check runs on the same raw
-                    // KeyEvent regardless of what handle_key already did with it, so
-                    // without this guard, typing a capital R while free-typing (search,
-                    // podcast-add, an update/uninstall password) would trigger a full
-                    // reload mid-keystroke, discarding whatever was being typed.
-                    if let KeyCode::Char('R') = key.code
-                        && !app.is_capturing_free_text() {
-                        app.library_needs_reload = true;
+            // Waits for whichever comes first: a terminal event, a background task saying it
+            // has something to show (see utils::wake), or the tick - which still drives
+            // the things nothing signals, like the title scroll and the periodic refresh
+            // checks. A finished cover fetch or a new playback state used to sit until the
+            // next tick; now the loop runs the moment it happens.
+            let next_event = tokio::select! {
+                // Keys first: a random pick between a ready key and a pending wake costs an extra redraw per key.
+                biased;
+                event = events.next() => Some(event),
+                _ = crate::utils::wake::woken() => None,
+                _ = tokio::time::sleep(Duration::from_millis(250)) => None,
+            };
+            if let Some(next) = next_event {
+                match next {
+                    Some(Ok(event::Event::Key(key))) => {
+                        app.handle_key(key);
+                        // 'R' just arms the same library_needs_reload flag a Settings >
+                        // Library switch (or a podcast add/remove finishing - see
+                        // poll_podcast_add_result/poll_podcast_remove_result) already uses,
+                        // rather than reinit-ing inline here - the unconditional check below
+                        // is what actually reloads, since it runs every tick regardless of
+                        // whether a key was just pressed. Reloads triggered from a background
+                        // poll (podcast add/remove) resolve between keystrokes, not on one -
+                        // gating the reload on "a key was just pressed" left them sitting
+                        // there, reload pending, until the user happened to press anything.
+                        //
+                        // Gated on is_capturing_free_text: this check runs on the same raw
+                        // KeyEvent regardless of what handle_key already did with it, so
+                        // without this guard, typing a capital R while free-typing (search,
+                        // podcast-add, an update/uninstall password) would trigger a full
+                        // reload mid-keystroke, discarding whatever was being typed.
+                        if let KeyCode::Char('R') = key.code
+                            && !app.is_capturing_free_text() {
+                            app.library_needs_reload = true;
+                        }
                     }
+                    // A resize or any other terminal event only needs the redraw the next
+                    // iteration does anyway.
+                    Some(Ok(_)) => {}
+                    Some(Err(e)) => return Err(e.into()),
+                    None => break,
                 }
+            }
 
             if app.library_needs_reload {
                 let mut stdout = stdout();
@@ -295,7 +321,13 @@ async fn main() -> Result<()> {
                 // Reinitialize app to refresh - a working `app` already exists, so on
                 // failure the recovery screen offers a way to cancel back to it instead
                 // of forcing a fix-or-quit loop.
-                if let Some(new_app) = init_app_with_retry(&mut terminal, true).await? {
+                //
+                // The recovery screen reads the terminal directly, so the event stream (which
+                // has its own reader thread) is dropped for the duration and rebuilt after.
+                drop(events);
+                let reloaded = init_app_with_retry(&mut terminal, true).await;
+                events = EventStream::new();
+                if let Some(new_app) = reloaded? {
                     app = new_app;
                 } else {
                     // Cancelled - stay on the current app/library rather than
@@ -311,7 +343,7 @@ async fn main() -> Result<()> {
                 // (confirmed live: the player box's bottom border row sits exactly 3
                 // rows from the bottom, right where this message prints, and silently
                 // disappeared until something else forced a full repaint).
-                let _ = terminal.clear();
+                clear_screen(&mut terminal);
             }
 
         }
@@ -320,6 +352,15 @@ async fn main() -> Result<()> {
     ratatui::restore();
     restore_terminal_scroll_wheel();
     Ok(())
+}
+
+// `Terminal::clear` first asks the terminal where the cursor is, to put it back afterwards -
+// a round trip that waits for the terminal's reply, and with the event stream running that
+// wait can last until the next keypress. This app hides the cursor, so there is nothing to
+// restore: clear the screen directly and reset the diff buffers so the next draw repaints it all.
+fn clear_screen(terminal: &mut ratatui::DefaultTerminal) {
+    let _ = terminal.backend_mut().clear_region(ClearType::All);
+    terminal.swap_buffers();
 }
 
 // Waits for a just-submitted login attempt's spawned auth_process call (see

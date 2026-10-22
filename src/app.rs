@@ -931,6 +931,7 @@ impl App {
                 let result = check_update().await;
                 let _ = UPDATE_CHECK.set(result.clone());
                 let _ = tx.send(result);
+                crate::utils::wake::wake_main_loop();
             });
             (String::new(), Some(rx))
         }
@@ -1073,6 +1074,7 @@ impl App {
         let ids_library = ids_library.clone();
         tokio::spawn(async move {
             let _ = tx.send(fetch_all_pod_ep(token, server_address, ids_library).await);
+            crate::utils::wake::wake_main_loop();
         });
         Some(rx)
     } else {
@@ -1352,6 +1354,7 @@ impl App {
         let username = self.username.clone();
         tokio::spawn(async move {
             let _ = tx.send(fetch_podcast_home_data(&token, server_address, &id_selected_lib, newest_first, &username).await);
+            crate::utils::wake::wake_main_loop();
         });
         self.podcast_home_receiver = Some(rx);
     }
@@ -1612,6 +1615,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                         tokio::spawn(async move {
                             let Some(token) = token else {
                                 let _ = tx.send(PodcastAddOutcome::Failed("Not logged in".to_string()));
+                                crate::utils::wake::wake_main_loop();
                                 return;
                             };
                             let outcome = if query.starts_with("http://") || query.starts_with("https://") {
@@ -1639,6 +1643,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                                 }
                             };
                             let _ = tx.send(outcome);
+                            crate::utils::wake::wake_main_loop();
                         });
                     }
                     KeyCode::Esc => {
@@ -1675,10 +1680,12 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                             tokio::spawn(async move {
                                 let Some(token) = token else {
                                     let _ = tx.send(PodcastAddOutcome::ConfirmReady(Box::new(chosen)));
+                                    crate::utils::wake::wake_main_loop();
                                     return;
                                 };
                                 let Some(feed_url) = chosen.feed_url.clone() else {
                                     let _ = tx.send(PodcastAddOutcome::ConfirmReady(Box::new(chosen)));
+                                    crate::utils::wake::wake_main_loop();
                                     return;
                                 };
                                 // On failure, proceed with the search result as-is (still has
@@ -1703,6 +1710,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                                     Err(_) => chosen,
                                 };
                                 let _ = tx.send(PodcastAddOutcome::ConfirmReady(Box::new(enriched)));
+                                crate::utils::wake::wake_main_loop();
                             });
                         } else {
                             self.podcast_add_stage = Some(PodcastAddStage::Results(results));
@@ -1748,10 +1756,12 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                         tokio::spawn(async move {
                             let Some(token) = token else {
                                 let _ = tx.send(PodcastAddOutcome::Failed("Not logged in".to_string()));
+                                crate::utils::wake::wake_main_loop();
                                 return;
                             };
                             let outcome = create_and_seed_podcast(*chosen, episode_count, library_id, token, server_address).await;
                             let _ = tx.send(outcome);
+                            crate::utils::wake::wake_main_loop();
                         });
                     }
                     _ => {
@@ -1781,6 +1791,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                     tokio::spawn(async move {
                         let Some(token) = token else {
                             let _ = tx.send(());
+                            crate::utils::wake::wake_main_loop();
                             return;
                         };
                         if let Err(e) = delete_library_item(&item_id, hard, &token, server_address).await {
@@ -1789,6 +1800,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                         // Reload regardless of success/failure - a failed delete leaves
                         // the library unchanged, so the "reload" just confirms that.
                         let _ = tx.send(());
+                        crate::utils::wake::wake_main_loop();
                     });
                 }
             }

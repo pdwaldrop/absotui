@@ -12,3 +12,4 @@ pub mod download_cache;
 pub mod scroll_wheel;
 pub mod format_size;
 pub mod http_client;
+pub mod wake;

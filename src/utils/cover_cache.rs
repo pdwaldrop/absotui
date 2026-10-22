@@ -55,6 +55,7 @@ pub async fn fetch_and_cache_cover(token: String, item_id: String, server_addres
 
     std::fs::create_dir_all(covers_dir())?;
     std::fs::write(path, bytes)?;
+    crate::utils::wake::wake_main_loop();
 
     Ok(())
 }
@@ -77,6 +78,7 @@ pub async fn fetch_and_cache_external_cover(url: String, cache_key: String) -> R
 
     std::fs::create_dir_all(covers_dir())?;
     std::fs::write(path, bytes)?;
+    crate::utils::wake::wake_main_loop();
 
     Ok(())
 }
@@ -109,6 +111,7 @@ pub async fn fetch_and_cache_episode_cover(token: String, episode_id: String, li
 
     std::fs::create_dir_all(covers_dir())?;
     std::fs::write(path, &picture.data)?;
+    crate::utils::wake::wake_main_loop();
 
     Ok(())
 }
