@@ -7,6 +7,32 @@ use serde::Serialize;
 use log::error;
 
 
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum NumberOrText {
+    Number(f64),
+    Text(String),
+    Missing(()),
+}
+
+// Older versions of this app (and possibly other clients) sent a position as a string, and
+// the server hands back the type it was given - so a stored "623" has to read as 623.
+fn lenient_f64<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<f64, D::Error> {
+    match NumberOrText::deserialize(deserializer)? {
+        NumberOrText::Number(n) => Ok(n),
+        NumberOrText::Text(text) => text.trim().parse().map_err(serde::de::Error::custom),
+        NumberOrText::Missing(()) => Ok(0.0),
+    }
+}
+
+fn lenient_opt_f64<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<f64>, D::Error> {
+    match NumberOrText::deserialize(deserializer)? {
+        NumberOrText::Number(n) => Ok(Some(n)),
+        NumberOrText::Text(text) => Ok(text.trim().parse().ok()),
+        NumberOrText::Missing(()) => Ok(None),
+    }
+}
+
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Root {
@@ -16,9 +42,11 @@ pub struct Root {
     pub episode_id: Value,
     pub media_item_id: String,
     pub media_item_type: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_opt_f64")]
     pub duration: Option<f64>,
+    #[serde(deserialize_with = "lenient_f64")]
     pub progress: f64,
+    #[serde(deserialize_with = "lenient_f64")]
     pub current_time: f64,
     pub is_finished: bool,
     #[serde(default)]
@@ -114,5 +142,34 @@ mod tests {
         let parsed: Root = serde_json::from_str(raw).expect("should parse now that ebook_progress is f64");
         assert_eq!(parsed.current_time, 23172.0);
         assert!((parsed.progress - 0.6251214146614075).abs() < f64::EPSILON);
+    }
+
+    fn podcast_progress_with(duration: &str, progress: &str, current_time: &str) -> String {
+        format!(
+            r#"{{"id":"a","userId":"u","libraryItemId":"li","episodeId":"ep","mediaItemId":"mi","mediaItemType":"podcastEpisode","duration":{duration},"progress":{progress},"currentTime":{current_time},"isFinished":false,"hideFromContinueListening":false,"ebookLocation":null,"ebookProgress":null,"lastUpdate":1,"startedAt":1,"finishedAt":null}}"#
+        )
+    }
+
+    // A real response from a server that had stored the position as a string (an older
+    // session sync sent it that way): this used to fail with
+    // `invalid type: string "623", expected f64` and the episode was treated as unfinished.
+    #[test]
+    fn a_position_stored_as_a_string_still_reads_as_a_number() {
+        let parsed: Root = serde_json::from_str(&podcast_progress_with("1800.5", "0.34", r#""623""#)).expect("string position should parse");
+        assert_eq!(parsed.current_time, 623.0);
+        assert!((parsed.progress - 0.34).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn every_numeric_field_accepts_a_number_a_numeric_string_or_null() {
+        let parsed: Root = serde_json::from_str(&podcast_progress_with(r#""1800.5""#, r#""0.5""#, "12")).unwrap();
+        assert_eq!((parsed.duration, parsed.progress, parsed.current_time), (Some(1800.5), 0.5, 12.0));
+        let parsed: Root = serde_json::from_str(&podcast_progress_with("null", "null", "null")).unwrap();
+        assert_eq!((parsed.duration, parsed.progress, parsed.current_time), (None, 0.0, 0.0));
+    }
+
+    #[test]
+    fn a_non_numeric_position_is_still_an_error() {
+        assert!(serde_json::from_str::<Root>(&podcast_progress_with("1", "0.1", r#""soon""#)).is_err());
     }
 }
