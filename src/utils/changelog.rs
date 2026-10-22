@@ -1334,8 +1334,7 @@ let changelog_80 = "Changelog Absotui v0.11.1 (20/10/2026) \n\
          \n\
          Enjoy!\n
          ####\n".to_string();
-let changelog_81 = format!(
-    "Changelog Absotui v{VERSION} (21/10/2026) \n\
+let changelog_81 = "Changelog Absotui v0.11.2 (21/10/2026) \n\
          \n\
          Fixed:\n\
          - \"Your saved login isn't working\" (\"rejected your saved login\n\
@@ -1350,10 +1349,41 @@ let changelog_81 = format!(
            to fix it, instead of blaming your login.\n\
          \n\
          Enjoy!\n
+         ####\n".to_string();
+let changelog_82 = format!(
+    "Changelog Absotui v{VERSION} (22/10/2026) \n\
+         \n\
+         Fixed:\n\
+         - Auto Download could download the same episodes again and again,\n\
+           eating bandwidth and memory. Each refresh started another copy\n\
+           of the same downloads. Now each file downloads once at a time,\n\
+           a failed download waits two minutes before it tries again, and\n\
+           one that stops getting data gives up instead of hanging.\n\
+         - Downloads no longer sit in memory while they run. A big book\n\
+           used to take about its own size in RAM (hundreds of MB); it is\n\
+           now written straight to disk. A download that gets cut off\n\
+           picks up where it stopped when the server allows it.\n\
+         - If the server answers a download with an error (file not\n\
+           found, say), that now counts as a failed download instead of\n\
+           being saved as if it were the audio.\n\
+         - Pressing d to download while something is playing could leave\n\
+           the bottom edge of the Now Playing box blank until the next\n\
+           refresh. It repaints now.\n\
+         \n\
+         Changed:\n\
+         - Keys feel snappier. A keypress now shows on screen right away\n\
+           instead of after a short fixed wait, and holding a key down\n\
+           keeps up instead of lagging behind.\n\
+         - Playback shows its position sooner after you press play (about\n\
+           a second, in testing), because the player is checked more often\n\
+           while it loads.\n\
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_82);
     changelog.push_str(&changelog_81);
     changelog.push_str(&changelog_80);
     changelog.push_str(&changelog_79);
