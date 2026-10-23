@@ -33,9 +33,9 @@
 
 ## ✨ Features
 
-Absotui is a minimalist TUI built in Rust. It opens fast, barely touches your CPU while it's just sitting there, and stays quick even with a huge library.
+Absotui is a minimalist TUI built in Rust, for both audiobooks and podcasts. It opens fast, barely touches your CPU while it's just sitting there, and stays quick even with a huge library.
 
-- **Books & podcasts, both first-class:** a unified "New & Unfinished" podcast home, instant mark-as-finished (<kbd>F</kbd>), and auto-play straight into the next unfinished episode
+- **Podcast home:** one "New & Unfinished" list across all your shows, instant mark-as-finished (<kbd>F</kbd>), and auto-play straight into the next unfinished episode
 - **Manage podcast subscriptions:** add a show by name or a direct RSS URL (<kbd>A</kbd>), with cover art and a description shown as you browse the results, or remove one (<kbd>C</kbd>) and choose whether to keep or delete its downloaded files. It's all done from Library, with no separate screen
 - **Browse libraries:** flip through your Library, or jump to Collections and series (grouped, in sequence order) with <kbd>Tab</kbd>/<kbd>S</kbd>
 - **Listening stats:** a Stats page with streaks, a day-of-week chart, a year-long activity heat-map, recent sessions, and top lists for what and who you listen to most
