@@ -36,11 +36,11 @@
 Absotui is a minimalist TUI built in Rust. It opens fast, barely touches your CPU while it's just sitting there, and stays quick even with a huge library.
 
 - **Books & podcasts, both first-class:** a unified "New & Unfinished" podcast home, instant mark-as-finished (<kbd>F</kbd>), and auto-play straight into the next unfinished episode
-- **Manage podcast subscriptions:** add a show by name or a direct RSS URL (<kbd>A</kbd>), with cover art and a description shown as you browse the results, or remove one (<kbd>C</kbd>, keeping or deleting its downloaded files). It's all done from Library, with no separate screen
+- **Manage podcast subscriptions:** add a show by name or a direct RSS URL (<kbd>A</kbd>), with cover art and a description shown as you browse the results, or remove one (<kbd>C</kbd>) and choose whether to keep or delete its downloaded files. It's all done from Library, with no separate screen
 - **Browse libraries:** flip through your Library, or jump to Collections and series (grouped, in sequence order) with <kbd>Tab</kbd>/<kbd>S</kbd>
 - **Listening stats:** a Stats page with streaks, a day-of-week chart, a year-long activity heat-map, recent sessions, and top lists for what and who you listen to most
 - **Stream or listen offline:** download (<kbd>d</kbd>) any book or episode for offline listening. A downloaded copy is used automatically when you have one, and Auto Download can keep your current listens downloaded for you
-- **Cover art in your terminal:** book and episode artwork shown inline (Kitty/Ghostty/Sixel/iTerm2 terminals).
+- **Cover art in your terminal:** book and episode artwork shown inline (Kitty/Ghostty/Sixel/iTerm2 terminals)
 - **Chapter navigation:** browse a book's chapter list inline in Continue Listening, with progress for each chapter
 - **Desktop integration:** a custom app icon, a taskbar/dock icon on supported terminals, and a window title showing what's playing
 - **Uses your terminal's colors:** follows your terminal color scheme/theme
@@ -87,7 +87,7 @@ bash -c 'tmpfile=$(mktemp) && curl -LsSf https://github.com/pdwaldrop/absotui/ra
 In `/usr/local/bin` (option 1, from install script) or `~/.cargo/bin` (option 2, from install script):
 - `absotui` — the binary file
 
-In `~/.config/absotui` (Linux) or `~/Library/Preferences` (macOS) — the default path when `XDG_CONFIG_HOME` is empty:
+In `~/.config/absotui` (Linux) or `~/Library/Preferences/absotui` (macOS) — the default path when `XDG_CONFIG_HOME` is empty:
 - `.env` — contains the secret key
 - `config.toml` — configuration file
 - `absotui.log` — log file (it starts over at 5 MB, and the last one is kept as `absotui.log.old`)
@@ -108,7 +108,7 @@ chmod +x absotui-x86_64.AppImage
 ./absotui-x86_64.AppImage
 ```
 
-Playback needs VLC (`cvlc`) or mpv installed on your system - the AppImage doesn't bundle either (the install script above installs the one you pick).  
+Playback needs VLC (`cvlc`) or mpv installed on your system. The AppImage doesn't bundle either (the install script above installs the one you pick).  
 VLC is used by default. To use `mpv` instead, switch it in **Settings > Player** (or set `backend = "mpv"` under `[player]` in `config.toml`).
 
 On aarch64, use `absotui-aarch64.AppImage` instead. The AppImage includes update information, so AppImageUpdate and AppImageLauncher can find new releases on their own. It's separate from the install script above, so use whichever you prefer.
