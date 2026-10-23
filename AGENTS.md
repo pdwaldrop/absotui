@@ -1121,3 +1121,32 @@ CPU that doesn't settle), suspect the loop first: the rule for future code is in
 commit after the bump, so `stable` stays on the bump commit, which is fine (no installed file changed). Still open
 from earlier entries: central status-message channel, the LTO release profile (can be dry-run on CI), and Paul's own
 calls (`R` keeping Home, `/` from the episode view, rustfmt, AUR).
+
+### 2026-10-23 — Claude Code (AUR PKGBUILD bumped to 0.11.5, uncommitted)
+
+**What changed:** `packaging/aur-bin/PKGBUILD` and `.SRCINFO` (the draft AUR package `absotui-bin` from 2026-09-24,
+unpublished) were two releases of history behind at pkgver 0.9.1; now 0.11.5 with fresh checksums (both tarballs and
+`config.example.toml`; the desktop file and icon are unchanged). Dependencies were corrected against what the binary
+actually runs: `vlc` stays the only hard dependency (it is the default player); `mpv`, `xdg-utils` (opens the browser
+for SSO sign-in) and `kitty` + `gnu-netcat` (only used by the optional, off-by-default `cvlc_term` setting) are now
+`optdepends`. `gnu-netcat` used to be a hard dependency - the 2026-09-24 note said the binary shells out to `nc`, but
+that only happens inside `exec_nc`, which runs `kitty nc ...` when `cvlc_term` is on. The install script still lists
+netcat as a hard dependency; left as is.
+
+**How it was verified:** Checksums were computed from freshly downloaded v0.11.5 assets and match the release's
+`SHA256SUMS.txt`. `makepkg -f --nodeps` in a scratch copy downloaded the sources, validated all four checksums
+(config, desktop, icon, x86_64 tarball) and built `absotui-bin-0.11.5-1-x86_64.pkg.tar.zst`; the package holds
+`/usr/bin/absotui`, the example config, the desktop file and the icon, `.PKGINFO` shows the expected depend/optdepends,
+and the packaged binary reports 0.11.5 (glibc 2.34, no missing libraries). `.SRCINFO` regenerated with
+`makepkg --printsrcinfo`. Scratch files removed.
+
+**Not verified:** the aarch64 checksum (compared to the release's `SHA256SUMS.txt` and my own hash of the download, but
+makepkg only builds the host architecture); an actual install into a clean Arch system; `namcap` (not installed);
+publishing (still impossible: AUR registration is closed - checked 2026-10-23, the register page returns 503).
+
+**Open questions / handoff:** Two gaps a published package would have, neither changed: (1) first run needs manual setup -
+the app refuses to start without `~/.config/absotui/config.toml` and the login needs `ABSOTUI_SECRET_KEY` in
+`~/.config/absotui/.env`, which the install script creates but a pacman package can't; a `.install` file with
+`post_install()` instructions would cover it. (2) In-app Settings > Update/Uninstall runs the install script, which
+would drop a copy in `/usr/local/bin` that shadows the pacman-managed `/usr/bin/absotui`; AUR users should update through
+pacman instead. Also: `pkgver` and the `sha256sums_*` arrays need bumping on every release.
