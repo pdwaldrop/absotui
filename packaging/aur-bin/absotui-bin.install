@@ -1,0 +1,20 @@
+post_install() {
+    cat <<'MSG'
+
+==> Absotui needs a one-time setup per user (skip what you already have):
+
+      mkdir -p ~/.config/absotui
+      cp -n /usr/share/absotui/config.example.toml ~/.config/absotui/config.toml
+      [ -f ~/.config/absotui/.env ] || echo "ABSOTUI_SECRET_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')" > ~/.config/absotui/.env
+
+    The secret key only encrypts your saved login on your own disk. If you set
+    XDG_CONFIG_HOME, use that folder instead of ~/.config.
+
+==> Then run: absotui
+
+    VLC is the default player. For mpv, install the mpv package and switch in
+    Settings > Player.
+    Update Absotui through pacman or your AUR helper, not its in-app updater.
+
+MSG
+}

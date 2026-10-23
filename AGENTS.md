@@ -1150,3 +1150,27 @@ the app refuses to start without `~/.config/absotui/config.toml` and the login n
 `post_install()` instructions would cover it. (2) In-app Settings > Update/Uninstall runs the install script, which
 would drop a copy in `/usr/local/bin` that shadows the pacman-managed `/usr/bin/absotui`; AUR users should update through
 pacman instead. Also: `pkgver` and the `sha256sums_*` arrays need bumping on every release.
+
+### 2026-10-23 — Claude Code (AUR package: first-run message, uncommitted)
+
+**What changed:** Added `packaging/aur-bin/absotui-bin.install` (and `install=absotui-bin.install` in the PKGBUILD, plus the
+matching line in `.SRCINFO`). It closes the first of the two gaps listed in the entry above: after `pacman -S`
+the package prints the one-time per-user setup - create `~/.config/absotui`, copy the example config there, and
+write an `ABSOTUI_SECRET_KEY` into `.env` (same `od ... /dev/urandom` recipe the install script uses, and guarded so
+an existing config or key is never overwritten). It also says VLC is the default and how to get mpv, and to update through
+pacman or the AUR helper rather than the in-app updater (the second gap is still there in the code; the message just warns
+about it).
+
+**How it was verified:** `makepkg -f --nodeps` in a scratch copy built the package with the `.INSTALL` script inside; I ran
+its `post_install` to read the output and ran the three printed commands against a temporary home directory: the config
+and a 64-hex-character key were created, a second run changed nothing (same key, same config, a line added to the config
+survived), and the resulting `config.toml` parses with sections player/auth/downloads. Scratch files removed. (One of my
+test commands was blocked by the safety check for an `rm -rf` on a `$HOME`-derived path; I did not work around it, and
+redid the test with a fresh `mktemp` directory and no removal.)
+
+**Not verified:** the message as pacman actually prints it, and a real install on Arch; fish users get the same commands
+(`$(...)` and `||` work in fish 3.4+, older fish would need adjusting). Publishing is still blocked by closed AUR registration.
+
+**Open questions / handoff:** Still open: the in-app Settings > Update/Uninstall would put a copy in `/usr/local/bin` that
+shadows the pacman binary - a code change (e.g. detect a package-managed install) for whenever the AUR package is real.
+`pkgver` and the `sha256sums_*` arrays need bumping on every release.
