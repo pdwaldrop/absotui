@@ -1,0 +1,69 @@
+name: LTO dry run
+
+# Throwaway: builds the three release targets exactly the way release.yml does (same
+# action, same runners) with the candidate release profile in Cargo.toml, but uploads
+# nothing to any release. Lives only on the lto-dryrun branch.
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [lto-dryrun]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: universal-apple-darwin
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: absotui
+          target: ${{ matrix.target }}
+          dry-run: true
+          dry-run-intended: true
+
+      - name: Report
+        shell: bash
+        run: |
+          bin="target/${{ matrix.target }}/release/absotui"
+          {
+            echo "### ${{ matrix.target }} (${{ matrix.os }})"
+            echo "- binary: $(wc -c < "$bin") bytes"
+            for f in absotui-*.tar.gz; do echo "- archive $f: $(wc -c < "$f") bytes"; done
+            if [[ "${{ matrix.target }}" == *linux* ]]; then
+              echo "- highest glibc symbol: $(readelf --dyn-syms -W "$bin" | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1)"
+            fi
+            if [[ "${{ matrix.target }}" == universal-apple-darwin ]]; then
+              echo "- lipo: $(lipo -info "$bin")"
+            fi
+            if [[ "${{ matrix.target }}" == x86_64-unknown-linux-gnu || "${{ matrix.target }}" == universal-apple-darwin ]]; then
+              echo "- runs: $("$bin" --version)"
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Tests under the release profile
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: cargo test --release --locked
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dryrun-${{ matrix.target }}
+          path: absotui-*.tar.gz
+          retention-days: 1
