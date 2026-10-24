@@ -46,6 +46,10 @@ doesn't have to rediscover it.
   explicit go-ahead in chat after seeing that description - his instruction,
   given with knowledge of what was verified, is the authorization. Don't wait
   on a recorded demo or Paul personally running it himself.
+- 2026-10-23 (Paul): The LTO + strip release profile (`lto = "thin"`, `codegen-units = 1`, `strip = true`) is
+  not adopted. It was dry-run on CI and works (binary -43%, download -30%, no speed change), but the gain is
+  cosmetic and it costs slower release builds (macOS about 10 min instead of 3.5) and function names in crash
+  backtraces. Revisit only if binary size becomes a real problem (e.g. a distro package asks for it).
 
 ## Dialog
 
@@ -1174,3 +1178,45 @@ redid the test with a fresh `mktemp` directory and no removal.)
 **Open questions / handoff:** Still open: the in-app Settings > Update/Uninstall would put a copy in `/usr/local/bin` that
 shadows the pacman binary - a code change (e.g. detect a package-managed install) for whenever the AUR package is real.
 `pkgver` and the `sha256sums_*` arrays need bumping on every release.
+
+### 2026-10-23 — Claude Code (dry run of a smaller release build on CI, nothing shipped)
+
+**What changed:** No change on `main`. Paul asked for the LTO + strip release profile to be dry-run on CI. I pushed a
+throwaway branch, `lto-dryrun`, with two things: a `[profile.release]` block in `Cargo.toml` (`lto = "thin"`,
+`codegen-units = 1`, `strip = true`) and `.github/workflows/lto-dryrun.yml`, which builds the same three targets on the
+same runners with the same `taiki-e/upload-rust-binary-action` that `release.yml` uses, but in its `dry-run` mode (builds
+and archives, uploads nothing to any release). It also ran `cargo test --release` on x86_64. The workflow only triggers on
+pushes to that branch, so it is inert elsewhere. **The branch could not be deleted afterwards:** the repository ruleset
+"No forced Push" (id 25515489, applies to `~ALL` branches, no bypass actors) blocks deletion, and I did not touch the ruleset.
+`lto-dryrun` therefore still exists on GitHub; it is harmless and reusable for a later dry run (push to it to re-run).
+
+**Results (CI run 40017841096 vs the shipped v0.11.5 assets):** all three builds and the 122 tests passed under the profile.
+Binary size: x86_64 29.3 -> 16.8 MB (-43%), aarch64 26.7 -> 14.0 MB (-48%), macOS universal 50.6 -> 29.7 MB (-41%).
+Download (tar.gz) size: 10.0 -> 7.0 MB, 9.7 -> 6.3 MB, 18.8 -> 13.2 MB (about -30% each). Highest glibc requirement
+unchanged (2.34 x86_64, 2.18 aarch64); the macOS binary is still universal (x86_64 + arm64) and the x86_64 and macOS
+binaries run (`--version`). Build time: Linux jobs about the same as a real release (4-5 min); the **macOS job took about 10
+min instead of about 3.5** (both architectures built with one codegen unit). Locally, the CI-built x86_64 binary vs the
+shipped one, alternating runs on a quiet machine: first screen 102 vs 102 ms, idle CPU 0.25-0.30% vs 0.30% (home) and 0.40%
+vs 0.40% (playing), memory 19-21 vs 21-22 MB, 30 queued keys 0.64 vs 0.67 s, new cover 13 vs 13-15 ms, player bar 120 vs
+120 ms, and the same play/pause/resume/stop behavior - no speed difference either way.
+
+**Not verified:** the AppImage step (skipped in the dry run; it packages the same binary), aarch64 and macOS binaries beyond
+`--version`/inspection (the aarch64 one was not run), and a real release with the profile. Costs to weigh: stripped binaries
+lose function names in backtraces (a crash report with `RUST_BACKTRACE=1` would show addresses; panic messages keep
+file and line); local `cargo build --release` gets slower; the macOS release job is about 6 minutes longer.
+
+**Open questions / handoff:** Paul decides whether to put the `[profile.release]` block on `main` and ship it in the next
+release - it is four lines in `Cargo.toml`. Deleting `lto-dryrun` needs a change to the ruleset (his call), or just leave it.
+
+### 2026-10-23 — Claude Code (LTO + strip: decided not to adopt)
+
+**What changed:** Only this file. Paul reviewed the dry-run results in the entry above and decided not to adopt the profile;
+recorded under Standing decisions. Plain stripping without LTO was also measured and is not worth it either: the shipped
+x86_64 binary goes 29.3 -> 23.2 MB (-21%) but the download only 10.0 -> 9.1 MB (-9%), with the same loss of backtrace names;
+nearly all of the large saving comes from LTO, which is what slows the builds.
+
+**How it was verified:** Sizes measured on the shipped v0.11.5 x86_64 binary with `strip`; the LTO figures are from CI run
+40017841096. No code changed, so no build/test run was needed.
+
+**Open questions / handoff:** The `lto-dryrun` branch still exists on GitHub (the "No forced Push" ruleset blocks deleting it).
+It is inert and can be reused: pushing to it re-runs the dry-run workflow.
