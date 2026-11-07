@@ -1317,3 +1317,30 @@ several users (only the default user's tokens are decrypted, so only theirs are 
 so rolling back after updating means logging in again - the release notes say so. The Argon2 cost is the OWASP minimum and is stored per value, so it
 can be raised later without a migration. Still open: trimming the `image` crate's formats to drop the unmaintained `paste` warning, and a scheduled
 `cargo audit` CI job (it would now pass apart from that warning).
+
+### 2026-11-07 — Claude Code (v0.11.6 release)
+
+**What changed:** Cut v0.11.6 (patch - hardening, no new feature) at Paul's request, carrying everything since v0.11.5: the dependency refresh
+(f5fda50), the owner-only secret files and random-key setup text (1478f5b), and the replacement of `magic-crypt` with AES-256-GCM under an
+Argon2id-derived key plus the startup upgrade of existing logins (5d17713). The v0.11.5 changelog entry was frozen and a v0.11.6 one added (0b9c207);
+the workflow's bump commit is 75256dd. The README now says the saved login is encrypted and the two files are owner-only.
+
+**How it was verified:** `cargo test` (138 passed) and the CI clippy command clean before the changelog commit; CI on the code push passed on ubuntu and
+macOS. Cut Release and Release workflows succeeded (all three binary builds and the checksum job); all 12 assets are on the release and every
+downloadable file matches `SHA256SUMS.txt`. The x86_64 binary and AppImage report 0.11.6; both Linux binaries contain the new code (AES-256-GCM, Argon2id,
+the upgrade log line, the new setup text) and neither contains the old crate's name. Highest glibc requirement is unchanged: 2.34 (x86_64), 2.18 (aarch64);
+the macOS tarball is a universal binary. `main`, `stable` and the tag sit on the bump commit and the four files the installer fetches from `stable` are
+byte-identical to the release assets (the served installer has the `chmod 600` step). `ubuntu-latest` was Ubuntu 26.04 and the build was unaffected.
+End to end with the RELEASED x86_64 binary: the previous release (v0.11.5) logged in against a throwaway fake server and stored plain-base64 values
+(108 and 24 characters); v0.11.6 started on that database, loaded Home, upgraded both to `v2:` (171 and 83 characters), left `.env` and `db.sqlite3` at mode
+600, and a second start worked. Earlier in the session (debug build): fresh login stores `v2:`, a wrong secret shows the existing "can't be decrypted"
+screen with the database untouched, a one-character change in a stored value is rejected, and the previous release cannot read an upgraded database.
+
+**Not verified:** a real `absotui --update` or fresh install from this release on any machine; the aarch64 and macOS binaries were inspected, not run; the
+AppImage ran with `APPIMAGE_EXTRACT_AND_RUN`, not through FUSE; the upgrade on Paul's real database (his own copy is still v0.11.5 until he runs
+`absotui --update`); a login upgrade and a token refresh in the same startup.
+
+**Open questions / handoff:** The upgrade is one-way - an older Absotui cannot read the new format (the in-app changelog says so). Paul's real `.env` and
+`db.sqlite3` become owner-only the first time he runs this version. Still open: trimming the `image` crate's formats to drop the unmaintained `paste` warning,
+a scheduled `cargo audit` job, and the remaining major-version bumps (rusqlite 0.41, dirs 7, sha2 0.11, base64 0.23, getrandom 0.4; `magic-crypt` is gone).
+This entry is the only commit after the bump, so `stable` stays on the bump commit, which is fine (no installed file changed).
