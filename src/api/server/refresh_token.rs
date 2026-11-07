@@ -354,6 +354,20 @@ mod tests {
         assert_eq!(outcome, RefreshOutcome::TransientError);
     }
 
+    // Closing with the request unread makes the OS reset the connection, and the client can
+    // lose the reply - so a mock server reads the request first, as a real one does.
+    async fn read_request(socket: &mut tokio::net::TcpStream) {
+        use tokio::io::AsyncReadExt;
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 512];
+        while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+            match socket.read(&mut chunk).await {
+                Ok(0) | Err(_) => break,
+                Ok(n) => request.extend_from_slice(&chunk[..n]),
+            }
+        }
+    }
+
     async fn outcome_for_status(status_line: &'static str) -> RefreshOutcome {
         use tokio::io::AsyncWriteExt;
         use tokio::net::TcpListener;
@@ -362,6 +376,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             if let Ok((mut socket, _)) = listener.accept().await {
+                read_request(&mut socket).await;
                 let response = format!("HTTP/1.1 {status_line}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                 let _ = socket.write_all(response.as_bytes()).await;
             }
@@ -395,6 +410,7 @@ mod tests {
         tokio::spawn(async move {
             while let Ok((mut socket, _)) = listener.accept().await {
                 counter.fetch_add(1, Ordering::SeqCst);
+                read_request(&mut socket).await;
                 let _ = socket
                     .write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
                     .await;
