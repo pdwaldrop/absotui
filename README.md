@@ -129,9 +129,9 @@ mkdir -p ~/.config/absotui
 cp config.example.toml ~/.config/absotui/config.toml
 ```
 
-Token encryption in the database (<u>**NOTE**</u>: replace `secret`):
+Token encryption in the database (a random key that only your user can read):
 ```bash
-echo ABSOTUI_SECRET_KEY=secret >> ~/.config/absotui/.env
+(umask 077; echo "ABSOTUI_SECRET_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')" >> ~/.config/absotui/.env)
 ```
 
 ```bash

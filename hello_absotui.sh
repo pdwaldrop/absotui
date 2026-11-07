@@ -523,7 +523,9 @@ post_install_msg() {
     if ! [[ -f "$CONFIG_DIR/.env" ]]; then
         echo "[INFO] No secret found in .env. Do this:"
         echo "    $ mkdir -p ~/.config/absotui"
-        echo "    $ echo 'ABSOTUI_SECRET_KEY=secret' > ~/.config/absotui/.env"
+        cat <<'MSG'
+    $ (umask 077; echo "ABSOTUI_SECRET_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')" > ~/.config/absotui/.env)
+MSG
     fi
 }
 
@@ -542,6 +544,10 @@ install_config() {
         key=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')
         echo "ABSOTUI_SECRET_KEY=${key}" > "$env"
         echo "[INFO] Generated a secret key to encrypt your stored Audiobookshelf login at $env"
+    fi
+    # The key is next to the data it protects, so only the owner may read it.
+    if [[ -f "$env" ]]; then
+        chmod 600 "$env"
     fi
 
     # config.
@@ -855,8 +861,10 @@ install_menu() {
                 echo "cd absotui/"
                 echo "mkdir -p ~/.config/absotui"
                 echo "cp config.example.toml ~/.config/absotui/config.toml"
-                echo "token encryption in the database (note: replace secret) : "
-                echo "echo absotui_secret_key=secret >> ~/.config/absotui/.env"
+                echo "token encryption in the database (a random key that only your user can read):"
+                cat <<'MSG'
+(umask 077; echo "ABSOTUI_SECRET_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')" >> ~/.config/absotui/.env)
+MSG
                 echo "cargo run --release"
                 echo "update :"
                 echo "git pull {URL}"

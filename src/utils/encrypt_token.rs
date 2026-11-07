@@ -5,7 +5,8 @@ use log::error;
 // `.env` is read once at startup, hence the restart.
 const MISSING_SECRET_MESSAGE: &str = "No secret found in .env. Do this:\n\
 mkdir -p ~/.config/absotui\n\
-echo 'ABSOTUI_SECRET_KEY=secret' >> ~/.config/absotui/.env\n\
+KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \\n')\n\
+echo \"ABSOTUI_SECRET_KEY=$KEY\" >> ~/.config/absotui/.env\n\
 then restart Absotui.";
 
 pub fn encrypt_token(token_to_encrypt: &str) -> Result<String, String> {
@@ -58,8 +59,16 @@ mod tests {
     #[test]
     fn missing_secret_message_has_no_stray_indentation_and_says_to_restart() {
         assert!(!MISSING_SECRET_MESSAGE.contains("  "));
-        assert_eq!(MISSING_SECRET_MESSAGE.lines().count(), 4);
+        assert_eq!(MISSING_SECRET_MESSAGE.lines().count(), 5);
+        assert!(MISSING_SECRET_MESSAGE.lines().all(|line| line.len() <= 78), "a longer line wraps on an 80-column terminal");
         assert!(MISSING_SECRET_MESSAGE.ends_with("then restart Absotui."));
+    }
+
+    #[test]
+    fn missing_secret_message_generates_a_random_key_not_a_guessable_one() {
+        assert!(MISSING_SECRET_MESSAGE.contains("KEY=$(od -An -tx1 -N32 /dev/urandom"));
+        assert!(MISSING_SECRET_MESSAGE.contains("ABSOTUI_SECRET_KEY=$KEY"));
+        assert!(!MISSING_SECRET_MESSAGE.contains("=secret"));
     }
 
     #[test]

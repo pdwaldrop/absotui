@@ -45,6 +45,7 @@ fn open_db(db_path: PathBuf) -> Result<Rc<Connection>> {
             }
             return Ok(cached.conn.clone());
         }
+        crate::utils::private_files::create_private_or_restrict(&db_path);
         let conn = Connection::open(&db_path)?;
         let _ = conn.busy_timeout(Duration::from_millis(500));
         conn.set_prepared_statement_cache_capacity(48);

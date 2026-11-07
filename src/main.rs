@@ -63,6 +63,7 @@ async fn main() -> Result<()> {
         }, PathBuf::from);
     let env_path = config_path.join("absotui").join(".env");
     dotenvy::from_filename(env_path.clone()).ok();
+    utils::private_files::restrict_existing(&env_path);
 
     let mut _database = Database::new().await?;
     let mut _database_ready = false;
