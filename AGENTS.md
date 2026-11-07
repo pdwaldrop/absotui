@@ -1220,3 +1220,32 @@ nearly all of the large saving comes from LTO, which is what slows the builds.
 
 **Open questions / handoff:** The `lto-dryrun` branch still exists on GitHub (the "No forced Push" ruleset blocks deleting it).
 It is inert and can be reused: pushing to it re-runs the dry-run workflow.
+
+### 2026-11-07 — Claude Code (dependency refresh)
+
+**What changed:** Paul asked whether the TUI stack is current. Checked every direct dependency against crates.io: the TUI core
+already is (`ratatui` 0.30.2 and `crossterm` 0.29.0 are the newest releases; Rust 1.98, edition 2024). Then, at his request, a low-risk
+refresh (commit f5fda50): `cargo update` within the existing requirements (tokio 1.53 -> 1.54.1, reqwest 0.13.5, ratatui-image
+11.0.6 -> 11.1.0 (latest stable; 12 is only at rc.3), ratatui-textarea 0.9.4, rusqlite 0.40.2, clap, serde_json, config, log, id3,
+pty-process, futures; about 197 packages in the lock), `dotenv` -> `dotenvy` (dotenv is unmaintained since 2019, RUSTSEC-2021-0141;
+one call in `main.rs`), and removal of `serde_derive` (declared, never used directly). The tokio bump exposed a latent race in two
+`refresh_token` tests: the mock server closed the connection without reading the request, so the OS could reset it and the client lose
+the reply (the 401 case failed every run). Bisected to tokio alone (every other suspect, tested one at a time from the old lock,
+passed); the mocks now read the request first. Test code only.
+
+**How it was verified:** `cargo build --locked`, `cargo test --locked` (122 passed, five runs in a row plus one single-threaded; the
+fixed test 30/30), the exact CI clippy command clean, and a release-profile build. Live against a throwaway fake Audiobookshelf with its own
+config, ports and VLC (Paul's server, config and session untouched): login with no `ABSOTUI_SECRET_KEY` in the environment (proves `dotenvy`
+reads `.env`; token saved encrypted), relaunch decrypts it and loads Home, Settings > Player renders, playback through VLC with a ranged
+stream fetch, progress syncs as numbers (`{"currentTime":11,"timeListened":11}`), stop closes the session and VLC exits; startup in a silent
+terminal is 2.1 s on both the installed v0.11.5 and the refreshed build, so the `ratatui-image` bump did not change it.
+
+**Not verified:** macOS (CI covers it on push), Paul's real server and terminal, mpv playback, cover rendering in a terminal that answers the image
+query, and `cargo audit` (not installed, so no vulnerability scan was run).
+
+**Left alone on purpose:** the major-version bumps (rusqlite 0.41, magic-crypt 6, dirs 7, sha2 0.11, base64 0.23, getrandom 0.4) and ratatui-image 12
+(release candidate). `magic-crypt` encrypts the saved login, so a major bump needs a test proving existing saved tokens still decrypt before it
+ships. `vlc-rc` (last published 2022, one use) works and is only worth watching.
+
+**Open questions / handoff:** Not released - no user-visible change, so no changelog entry; it will ride the next release. Worth installing
+`cargo-audit` once for a real vulnerability scan.
