@@ -1420,8 +1420,7 @@ let changelog_83 = "Changelog Absotui v0.11.4 (22/10/2026) \n\
          \n\
          Enjoy!\n
          ####\n".to_string();
-let changelog_84 = format!(
-    "Changelog Absotui v{VERSION} (22/10/2026) \n\
+let changelog_84 = "Changelog Absotui v0.11.5 (22/10/2026) \n\
          \n\
          Changed:\n\
          - Things show up the moment they're ready. Absotui used to look for\n\
@@ -1433,10 +1432,37 @@ let changelog_84 = format!(
            resizing and CPU use while it sits open are unchanged.\n\
          \n\
          Enjoy!\n
+         ####\n".to_string();
+let changelog_85 = format!(
+    "Changelog Absotui v{VERSION} (07/11/2026) \n\
+         \n\
+         Changed:\n\
+         - Your saved login is now protected by a modern, tamper-proof\n\
+           cipher (AES-256-GCM, with the key derived from your secret key\n\
+           by Argon2id). The older scheme had a published security\n\
+           advisory and no tamper protection. Nothing to do: an existing\n\
+           login is upgraded automatically the first time you start.\n\
+           If you ever go back to an older Absotui afterwards, it can't\n\
+           read the upgraded login and you'll need to sign in again.\n\
+         - .env (your secret key) and db.sqlite3 are now readable only by\n\
+           you. Existing ones are tightened the first time you start, and\n\
+           new ones are created that way.\n\
+         - The setup steps and the error message that told you to write\n\
+           ABSOTUI_SECRET_KEY=secret now generate a random key. If you typed\n\
+           a short key yourself, you can replace it with a random one -\n\
+           you'll just sign in again.\n\
+         - Dependencies were refreshed.\n\
+         \n\
+         Fixed:\n\
+         - The manual install steps wrote the key's name in lowercase,\n\
+           which Absotui never read, so they could not have worked.\n\
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_85);
     changelog.push_str(&changelog_84);
     changelog.push_str(&changelog_83);
     changelog.push_str(&changelog_82);
