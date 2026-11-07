@@ -1249,3 +1249,38 @@ ships. `vlc-rc` (last published 2022, one use) works and is only worth watching.
 
 **Open questions / handoff:** Not released - no user-visible change, so no changelog entry; it will ride the next release. Worth installing
 `cargo-audit` once for a real vulnerability scan.
+
+### 2026-11-07 — Claude Code (cheap hardening after the vulnerability scan, uncommitted)
+
+**What changed:** `cargo audit` (installed today, 0.22.2) found one real advisory, RUSTSEC-2024-0430 in `magic-crypt` (unauthenticated AES-CBC,
+no key-derivation function, unsound memory use; the advisory lists no patched version, so the 6.0 release is not a known fix) and one
+warning (`paste` unmaintained, via `image` -> exr/rav1e). Practical risk is low for a local single-user app, but two cheap gaps
+sat next to it, and Paul asked for those first (the `magic-crypt` replacement is a separate, bigger decision):
+1. *Secret files are owner-only.* `.env` and `db.sqlite3` were `0644`. New `src/utils/private_files.rs`: the database is created `0600`
+   if missing (an empty file is a valid new SQLite database) and tightened if it already exists, in `open_db` (`src/db/crud.rs`); `.env`
+   is tightened at startup if present (`src/main.rs`). Content is never touched; group/other access is removed only when present.
+   The installer (`hello_absotui.sh`) now `chmod 600`s `.env` after generating or finding it, and the AUR first-run snippet creates
+   it under `umask 077`.
+2. *No more guessable example key.* The README manual steps, the installer's post-install hint, its "Option 3" steps and the in-app
+   missing-key message all told users to write `ABSOTUI_SECRET_KEY=secret`; they now generate a random 64-hex key with the same
+   `od ... /dev/urandom` recipe the installer already used. The Option 3 text also wrote the name in lowercase
+   (`absotui_secret_key`), which the app never reads, so those steps could not have worked; fixed. The in-app message is two short
+   command lines (5 lines total, each under 78 characters) because a single long line wrapped mid-path on an 80-column terminal.
+
+**How it was verified:** `cargo build`/`test` (129 passed: 122 plus 7 new - tightening, leaving owner-only files alone, never
+creating a missing `.env`, creating `0600`, not truncating, SQLite accepting the pre-created empty file, and the message wording/width)
+and the exact CI clippy command are clean. Live with throwaway config dirs (the real `~/.config/absotui` was not touched): a fresh start
+creates `db.sqlite3` as `0600` and tightens a `0644` `.env`; an existing `0666` database with a row in it becomes `0600` and keeps the
+row; every printed command (README, AUR, installer hint, the two in-app lines) was executed in a scratch HOME and produced a 64-char key
+in an uppercase-named `.env`; the installer's config step makes a new `.env` `0600` and tightens an existing `0644` one without changing
+the key; the in-app message renders on 80x24 without wrapping, the failed login saves no user, and a login with the key it told us to
+generate saves an encrypted token.
+
+**Not verified:** macOS and CI (the permission calls are plain Unix, so CI should cover them on push); Paul's real files (they are
+still `0644`, inside a `0700` home - they tighten the next time he runs a build with this change); a `.env` that is a symlink (the
+permission change follows it to the target); `absotui.log` is left as is (it holds the server address and username, not tokens).
+
+**Open questions / handoff:** Not committed - waiting on Paul's go-ahead; no changelog entry yet (invisible except the message text and
+permissions; it rides the next release). Still open: replacing `magic-crypt` with an authenticated cipher plus a proper key derivation, with a
+fallback that still decrypts existing saved tokens (the real fix for RUSTSEC-2024-0430), and optionally trimming the `image` crate's formats
+to drop `paste`. A scheduled `cargo audit` CI job would currently fail on the `magic-crypt` advisory unless it is ignored on purpose.
