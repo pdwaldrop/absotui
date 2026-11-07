@@ -88,10 +88,10 @@ In `/usr/local/bin` (option 1, from install script) or `~/.cargo/bin` (option 2,
 - `absotui` — the binary file
 
 In `~/.config/absotui` (Linux) or `~/Library/Preferences/absotui` (macOS) — the default path when `XDG_CONFIG_HOME` is empty:
-- `.env` — contains the secret key
+- `.env` — contains the secret key that encrypts your saved login (kept readable only by you)
 - `config.toml` — configuration file
 - `absotui.log` — log file (it starts over at 5 MB, and the last one is kept as `absotui.log.old`)
-- `db.sqlite3` — SQLite database file
+- `db.sqlite3` — SQLite database file (settings, progress, and your saved login, which is encrypted with AES-256-GCM under a key derived from the secret; kept readable only by you)
 - `covers/` — on-disk cache of cover art (populated automatically as covers load)
 - `downloads/` — books and podcast episodes downloaded for offline playback (only appears once you download something)
 

@@ -25,7 +25,7 @@ use crate::logic::handle_input::handle_l_pod_home::handle_l_pod_home;
 use crate::logic::handle_input::handle_add_podcast::create_and_seed_podcast;
 use crate::logic::server_recovery::{diagnose_rejected_login, LoginProblem};
 use crate::config::{ConfigFile, load_config, set_backend};
-use crate::db::crud::{get_is_show_key_bindings, update_is_show_key_bindings, get_is_speed_adjusted_time, update_is_speed_adjusted_time, update_is_podcast_autoplay, delete_user, update_id_selected_lib, get_listening_session, get_is_vlc_running, update_is_per_item_speed, update_is_finished, get_is_auto_download, update_is_auto_download, update_pending_seek, update_login_err};
+use crate::db::crud::{get_is_show_key_bindings, update_is_show_key_bindings, get_is_speed_adjusted_time, update_is_speed_adjusted_time, update_is_podcast_autoplay, delete_user, update_id_selected_lib, get_listening_session, get_is_vlc_running, update_is_per_item_speed, update_is_finished, get_is_auto_download, update_is_auto_download, update_pending_seek, update_login_err, update_user_tokens};
 use crate::api::server::refresh_token::{maybe_refresh_token, refresh_now, sync_clock_with_server, RefreshOutcome};
 use crate::db::database_struct::Database;
 use crate::utils::convert_seconds::format_duration;
@@ -34,7 +34,7 @@ use color_eyre::Result;
 use color_eyre::eyre::Report;
 use futures::stream::{self, StreamExt};
 use crate::utils::http_client::MAX_CONCURRENT_REQUESTS;
-use log::{warn, error};
+use log::{info, warn, error};
 use ratatui::{
     crossterm::event::{KeyCode, KeyEvent, KeyEventKind},
     style::Style,
@@ -42,7 +42,7 @@ use ratatui::{
 };
 use crate::utils::pop_up_message::{pop_message, clear_message};
 use crate::utils::changelog::changelog;
-use crate::utils::encrypt_token::decrypt_token;
+use crate::utils::encrypt_token::{decrypt_token, encrypt_token, is_legacy_format};
 use std::io::stdout;
 use crate::logic::sync_session::sync_session_from_database::quit_app;
 use crate::logic::sync_session::wait_prev_session_finished::wait_prev_session_finished;
@@ -644,6 +644,20 @@ const SETTINGS_ENTRIES: [&str; 8] = [
     SETTINGS_ACCOUNT,
 ];
 
+/// Re-saves a login still stored in the older encryption format (see encrypt_token.rs) in
+/// the current one.
+fn upgrade_saved_login(username: &str, token: &str, refresh_token: &str) {
+    let refresh_encrypted = if refresh_token.is_empty() { Ok(String::new()) } else { encrypt_token(refresh_token) };
+    match (encrypt_token(token), refresh_encrypted) {
+        (Ok(access), Ok(refresh)) => {
+            if update_user_tokens(username, &access, &refresh).is_ok() {
+                info!("[upgrade_saved_login] Saved login for {username} re-encrypted in the current format");
+            }
+        }
+        _ => error!("[upgrade_saved_login] Couldn't re-encrypt the saved login for {username}"),
+    }
+}
+
 /// Init app
 impl App {
     /// Index of a named Settings menu entry in `self.settings`, if present - lets
@@ -692,6 +706,7 @@ impl App {
         if let Some(var_token) = database.default_usr.get(2) {
             token = var_token.clone();
         }
+        let token_was_legacy = is_legacy_format(&token);
         match decrypt_token(token.as_str()) {
             Ok(decrypted_token) => {
                 token = decrypted_token;
@@ -719,10 +734,15 @@ impl App {
         if let Some(var_refresh_token) = database.default_usr.get(15) {
             refresh_token = var_refresh_token.clone();
         }
+        let refresh_was_legacy = is_legacy_format(&refresh_token);
+        let mut refresh_readable = true;
         if !refresh_token.is_empty() {
             match decrypt_token(refresh_token.as_str()) {
                 Ok(decrypted_refresh_token) => refresh_token = decrypted_refresh_token,
-                Err(e) => println!("Error: {e}"),
+                Err(e) => {
+                    refresh_readable = false;
+                    println!("Error: {e}");
+                }
             }
         }
 
@@ -740,6 +760,10 @@ impl App {
         let mut username: String = String::new();
         if let Some(var_username) = database.default_usr.first() {
             username = var_username.clone();
+        }
+
+        if (token_was_legacy || refresh_was_legacy) && refresh_readable && !token.is_empty() {
+            upgrade_saved_login(&username, &token, &refresh_token);
         }
 
         // Without the "http(s)://" prefix, for display.
