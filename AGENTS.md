@@ -1284,3 +1284,36 @@ permission change follows it to the target); `absotui.log` is left as is (it hol
 permissions; it rides the next release). Still open: replacing `magic-crypt` with an authenticated cipher plus a proper key derivation, with a
 fallback that still decrypts existing saved tokens (the real fix for RUSTSEC-2024-0430), and optionally trimming the `image` crate's formats
 to drop `paste`. A scheduled `cargo audit` CI job would currently fail on the `magic-crypt` advisory unless it is ignored on purpose.
+
+### 2026-11-07 — Claude Code (magic-crypt replaced with an authenticated cipher)
+
+**What changed:** The `cargo audit` advisory RUSTSEC-2024-0430 (`magic-crypt`: unauthenticated AES-CBC, no key-derivation function, unsound
+memory use, no patched version) is closed by removing the crate. `src/utils/encrypt_token.rs` now stores saved logins as `v2:` + base64 of
+`[Argon2id memory KiB u32][iterations u8][lanes u8][salt 16][nonce 12][AES-256-GCM sealed]`: a fresh random salt per value gives each its own
+key (Argon2id at OWASP's minimum, 19 MiB / 2 passes / 1 lane, about 10 ms per operation in a release build), and the cost parameters and salt
+are authenticated as associated data. A stored header asking for more than 256 MiB / 10 passes / 4 lanes is refused before any work, so a tampered
+database cannot make startup allocate gigabytes. Anything without the prefix is the old format, which is still READ (never written):
+AES-256-CBC, PKCS#7, key = SHA-256 of the secret, an all-zero IV, standard base64, reimplemented with `aes` + `cbc` + `sha2` so the vulnerable crate
+can go. At startup `App::new` re-saves a login that is still in the old format in the new one (`upgrade_saved_login`, only when both values
+decrypted and the access token is non-empty); the login and refresh paths use `encrypt_token`, so they now write `v2:`. `magic-crypt`, `crc-any`,
+`des`, `tiger` and `md-5` left the lock; `aes-gcm`, `argon2`, `aes`, `cbc` and a handful of small RustCrypto crates came in (the crates are
+the current generation: aes 0.9, cbc 0.2, aes-gcm 0.11, argon2 0.6). The README now says the saved login is encrypted and the two files are
+owner-only; CLAUDE.md's encryption line is updated.
+
+**How it was verified:** `cargo build`/`test` (138 passed: 129 plus 9 new - round trip, empty token, same token stored differently each time, wrong
+secret, a flipped byte anywhere in the cost/salt/nonce/ciphertext/tag, a hostile cost header, garbage and truncated values, fixed legacy vectors,
+the legacy-format test) and the exact CI clippy command are clean; `cargo audit` now reports no vulnerability (only the `paste` unmaintained warning).
+Before the dependency was removed, the reimplemented old-format decryption was checked against the real `magic-crypt` on 400 random secret/token pairs
+(all matched) and four fixed vectors from it were baked into the tests. Live against a throwaway fake server with its own config: the installed
+v0.11.5 (old crate) logged in and stored plain-base64 values (108 and 24 chars); this build then started on that database, upgraded both to `v2:`
+(171 and 87 chars), loaded Home, and a second start did no further upgrade; a fresh login with this build stores `v2:` and decrypts on relaunch; a
+wrong secret shows the existing "can't be decrypted" screen and leaves the database untouched; a one-character change in a stored value is rejected.
+
+**Not verified:** macOS and CI (pure Rust, no platform code); a login upgrade and a token refresh in the same startup (the refresh margin is ten
+minutes, so a short-lived fake token had already refreshed at login; both paths use `encrypt_token`, which the unit tests cover); a database with
+several users (only the default user's tokens are decrypted, so only theirs are upgraded, the others when they become the default).
+
+**Open questions / handoff:** The upgrade is one-way: an OLDER Absotui cannot read `v2:` values (the live test showed the "can't be decrypted" screen),
+so rolling back after updating means logging in again - the release notes say so. The Argon2 cost is the OWASP minimum and is stored per value, so it
+can be raised later without a migration. Still open: trimming the `image` crate's formats to drop the unmaintained `paste` warning, and a scheduled
+`cargo audit` CI job (it would now pass apart from that warning).
