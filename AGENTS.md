@@ -1501,3 +1501,18 @@ slow connections, fewer background requests in podcast mode" note in a v0.11.7 t
 hardening). Still open from the scan: the library listing still blocks the first screen on slow links (the real fix is loading it in
 the background, which touches the parallel arrays), the full episode lists are still fetched at startup and on `R` for every show,
 the memory plateau after repeated `R`, the series-grouped Library rebuilding its rows every redraw, and an unpruned cover cache.
+
+### 2026-11-07 — Claude Code (small network batch: committed and pushed)
+
+**What changed:** Nothing in the code. Closes the "not committed" notes in the two entries above: with Paul's go-ahead the batch went to
+`main` as 7572c0a (stats in the background, gzip, User-Agent, calmer podcast Home refresh, header tests) and db4b4ba (the scan and batch
+entries in this file).
+
+**How it was verified:** Before committing: `cargo test` (146 passed), the CI clippy command and `cargo audit` clean. After pushing: CI
+for db4b4ba passed on both ubuntu-latest and macos-latest (build, test, clippy) and the Security audit workflow passed on the new lock
+(three added crates).
+
+**Open questions / handoff:** Not released - no changelog entry yet. A v0.11.7 would carry two user-visible notes: a faster first screen
+when the server is slow to answer the stats request, and far fewer background requests in podcast mode while idle (one refresh a minute
+instead of one every 8 s). Still open from the scan: loading the library listing in the background, fetching show episode lists on first
+use instead of at startup, the memory plateau after repeated `R`, the series-grouped Library row rebuild, and cover cache pruning.
