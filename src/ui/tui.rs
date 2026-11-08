@@ -477,6 +477,11 @@ impl App {
         App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
         App::render_footer(footer_area, buf, &text_render_footer);
 
+        if self.stats_receiver.is_some() {
+            Paragraph::new("Loading your listening stats...").centered().render(main_area, buf);
+            return;
+        }
+
         let total_h = Self::STATS_OVERVIEW_H + Self::STATS_CHART_H + Self::STATS_DAY_OF_WEEK_H
             + Self::STATS_HEATMAP_H + Self::STATS_RANKINGS_H + Self::STATS_RECENT_SESSIONS_H;
         let canvas_area = Rect::new(0, 0, main_area.width, total_h);

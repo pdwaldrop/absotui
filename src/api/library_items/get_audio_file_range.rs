@@ -1,5 +1,5 @@
 use crate::utils::http_client::api_client;
-use reqwest::header::{AUTHORIZATION, RANGE};
+use reqwest::header::{ACCEPT_ENCODING, AUTHORIZATION, RANGE};
 use color_eyre::eyre::Result;
 
 // ID3v2 tags (and any embedded picture they carry) live at the very start of an MP3
@@ -19,6 +19,7 @@ pub async fn get_audio_file_prefix(token: &str, library_item_id: &str, ino: &str
         .get(url)
         .header(AUTHORIZATION, format!("Bearer {token}"))
         .header(RANGE, format!("bytes=0-{}", EMBEDDED_COVER_PREFIX_BYTES - 1))
+        .header(ACCEPT_ENCODING, "identity")
         .send()
         .await?;
 

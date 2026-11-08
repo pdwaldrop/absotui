@@ -200,8 +200,9 @@ async fn main() -> Result<()> {
             // requiring a manual refresh. The fetch runs in a background task (it takes
             // a request per episode); both calls are cheap no-ops most iterations.
             app.poll_update_check();
+            app.poll_stats();
             app.poll_podcast_home_refresh();
-            app.refresh_podcast_home_if_stale();
+            app.refresh_podcast_home_if_stale(is_playing == "1");
 
             // Keeps the access token from ever reaching Audiobookshelf's ~1 hour
             // default expiry while the app is open and in use - see

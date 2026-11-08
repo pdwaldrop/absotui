@@ -1,3 +1,4 @@
+use crate::utils::http_client::USER_AGENT;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use color_eyre::eyre::{Report, Result};
 use reqwest::{Client, StatusCode, Url, header, redirect};
@@ -61,7 +62,7 @@ pub fn parse_auth_methods(body: &str) -> Option<AuthMethods> {
 /// Which login methods the server offers, from its public `/status`. `None` on any
 /// failure, so callers fall back to the ordinary password login.
 pub async fn fetch_auth_methods(server_address: &str) -> Option<AuthMethods> {
-    let client = Client::builder().timeout(PROBE_TIMEOUT).build().ok()?;
+    let client = Client::builder().user_agent(USER_AGENT).timeout(PROBE_TIMEOUT).build().ok()?;
     let body = client
         .get(format!("{}/status", base_url(server_address)))
         .send()
@@ -128,6 +129,7 @@ fn cookie_header(headers: &header::HeaderMap) -> String {
 
 fn flow_client() -> Result<Client> {
     Client::builder()
+        .user_agent(USER_AGENT)
         .timeout(REQUEST_TIMEOUT)
         .redirect(redirect::Policy::none())
         .build()

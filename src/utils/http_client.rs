@@ -26,8 +26,12 @@ const DOWNLOAD_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 // itself, so a reused connection is never one the server has already hung up on.
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Sent on every request; some proxies and firewalls refuse a client that sends none.
+pub const USER_AGENT: &str = concat!("absotui/", env!("CARGO_PKG_VERSION"));
+
 static API_CLIENT: LazyLock<Client> = LazyLock::new(|| {
     Client::builder()
+        .user_agent(USER_AGENT)
         .timeout(API_TIMEOUT)
         .connect_timeout(CONNECT_TIMEOUT)
         .pool_idle_timeout(POOL_IDLE_TIMEOUT)
@@ -57,6 +61,8 @@ pub fn api_client() -> Client {
 /// stalled transfer fails (and resumes later) instead of hanging the download worker.
 pub fn download_client() -> Client {
     Client::builder()
+        .user_agent(USER_AGENT)
+        .no_gzip()
         .connect_timeout(CONNECT_TIMEOUT)
         .read_timeout(DOWNLOAD_STALL_TIMEOUT)
         .build()
@@ -73,3 +79,56 @@ pub fn download_client() -> Client {
 /// callers feed results straight into index-aligned parallel arrays, which silently
 /// desync if results come back in completion order instead of request order.
 pub const MAX_CONCURRENT_REQUESTS: usize = 12;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    async fn request_seen_by_server<F, Fut>(send: F) -> String
+    where
+        F: FnOnce(String) -> Fut,
+        Fut: std::future::Future<Output = ()>,
+    {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 8192];
+            let n = sock.read(&mut buf).await.unwrap();
+            sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok").await.unwrap();
+            String::from_utf8_lossy(&buf[..n]).to_lowercase()
+        });
+        send(base).await;
+        server.await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn api_client_asks_for_gzip_and_identifies_itself() {
+        let req = request_seen_by_server(|base| async move {
+            let _ = api_client().get(format!("{base}/x")).send().await;
+        }).await;
+        assert!(req.contains("accept-encoding: gzip"), "{req}");
+        assert!(req.contains(&format!("user-agent: {}", USER_AGENT.to_lowercase())), "{req}");
+    }
+
+    #[tokio::test]
+    async fn download_client_never_asks_for_compression() {
+        let req = request_seen_by_server(|base| async move {
+            let _ = download_client().get(format!("{base}/x")).send().await;
+        }).await;
+        assert!(!req.contains("accept-encoding"), "{req}");
+        assert!(req.contains("user-agent: absotui/"), "{req}");
+    }
+
+    #[tokio::test]
+    async fn embedded_cover_read_asks_for_identity_encoding() {
+        let req = request_seen_by_server(|base| async move {
+            let _ = crate::api::library_items::get_audio_file_range::get_audio_file_prefix("t", "item", "1", &base).await;
+        }).await;
+        assert!(req.contains("range: bytes=0-"), "{req}");
+        assert!(req.contains("accept-encoding: identity"), "{req}");
+        assert!(!req.contains("gzip"), "{req}");
+    }
+}

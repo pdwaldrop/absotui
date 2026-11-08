@@ -251,6 +251,9 @@ pub struct App {
     // User-level listening stats (AppView::Stats) - not scoped to the current
     // library, same as the Audiobookshelf endpoint it's built from.
     pub stats_summary: StatsSummary,
+    // Set while the stats are still being fetched in the background - the first screen
+    // never waits on them. See `poll_stats`.
+    pub(crate) stats_receiver: Option<tokio::sync::oneshot::Receiver<StatsSummary>>,
     pub ids_search_book: Vec<String>,
     pub search_query: String,
     // The search box (`/`) - rendered as an overlay on top of whatever screen it was
@@ -364,6 +367,10 @@ pub struct App {
     pub update_uninstall_receiver: Option<tokio::sync::mpsc::UnboundedReceiver<ProgressEvent>>,
     pub update_uninstall_password_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     pub podcast_home_last_refresh: std::time::Instant,
+    // Last time playback was seen running; keeps the fast refresh going a little after it
+    // stops. See `refresh_podcast_home_if_stale`.
+    podcast_last_playing: Option<std::time::Instant>,
+    podcast_home_was_visible: bool,
     // Set only while a periodic podcast Home refresh is in flight - see
     // `refresh_podcast_home_if_stale` and `poll_podcast_home_refresh`.
     podcast_home_receiver: Option<tokio::sync::oneshot::Receiver<Result<PodcastHomeData>>>,
@@ -971,23 +978,36 @@ impl App {
         }
     };
 
-    let (home_res, all_books_res, collections_res, listening_stats_res) = tokio::join!(
+    // The stats only feed the Stats screen, so they load in the background instead of
+    // holding up the first screen. A failed fetch just means an all-zero Stats screen
+    // this session, not a startup failure.
+    let (stats_tx, stats_receiver) = tokio::sync::oneshot::channel();
+    {
+        let token = token.clone();
+        let server_address = server_address.clone();
+        tokio::spawn(async move {
+            let summary = match get_listening_stats(&token, server_address).await {
+                Ok(stats) => collect_stats_summary(&stats, chrono::Local::now().date_naive()).await,
+                Err(e) => {
+                    warn!("[get_listening_stats] {e}");
+                    StatsSummary::default()
+                }
+            };
+            let _ = stats_tx.send(summary);
+            crate::utils::wake::wake_main_loop();
+        });
+    }
+
+    let (home_res, all_books_res, collections_res) = tokio::join!(
         home_fut,
         get_all_books(&token, &id_selected_lib, server_address.clone()),
         collections_fut,
-        get_listening_stats(&token, server_address.clone()),
     );
     home_res?;
     let all_books = all_books_res?;
     // A failed collections fetch just means the Collections ring stop doesn't
     // appear this session, not a hard startup failure like `all_books` above.
     let all_collections = collections_res.unwrap_or_default();
-    // Same tolerance as collections above - a failed stats fetch just means an
-    // all-zero AppView::Stats screen this session, not a startup failure.
-    let stats_summary = match listening_stats_res {
-        Ok(stats) => collect_stats_summary(&stats, chrono::Local::now().date_naive()).await,
-        Err(_) => StatsSummary::default(),
-    };
 
     // Settings > Auto Download: keep the local download set mirroring Continue
     // Listening (books) or New & Unfinished (podcasts). Hooked in here rather than a
@@ -1214,7 +1234,8 @@ impl App {
         podcast_add_error: None,
         podcast_remove_confirm: false,
         podcast_remove_receiver: None,
-        stats_summary,
+        stats_summary: StatsSummary::default(),
+        stats_receiver: Some(stats_receiver),
         ids_search_book,
         is_search_active,
         search_filter_cache: None,
@@ -1313,6 +1334,8 @@ impl App {
         update_uninstall_receiver: None,
         update_uninstall_password_tx: None,
         podcast_home_last_refresh: std::time::Instant::now(),
+        podcast_last_playing: None,
+        podcast_home_was_visible: false,
         podcast_home_receiver: None,
         image_picker,
         cover_protocol: None,
@@ -1356,14 +1379,20 @@ impl App {
         }
     }
 
-    pub fn refresh_podcast_home_if_stale(&mut self) {
-        // Finishing an episode doesn't push a signal to the main render loop (the
-        // playback handler runs in a separate spawned task) - it just relies on this
-        // periodic refresh to eventually notice the server-side "finished" flag and
-        // drop it from the list. Kept short so that removal feels prompt.
-        const STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(8);
+    pub fn refresh_podcast_home_if_stale(&mut self, is_playing: bool) {
+        if !self.is_podcast {
+            return;
+        }
+        if is_playing {
+            self.podcast_last_playing = Some(std::time::Instant::now());
+        }
+        let on_home = self.view_state == AppView::Home;
+        let just_arrived = on_home && !self.podcast_home_was_visible;
+        self.podcast_home_was_visible = on_home;
 
-        if !self.is_podcast || self.podcast_home_receiver.is_some() || self.podcast_home_last_refresh.elapsed() < STALE_AFTER {
+        let since_playing = self.podcast_last_playing.map(|t| t.elapsed());
+        if self.podcast_home_receiver.is_some()
+            || !podcast_refresh_due(self.podcast_home_last_refresh.elapsed(), is_playing, since_playing, just_arrived) {
             return;
         }
         let Some(token) = self.token.clone() else { return };
@@ -1394,6 +1423,19 @@ impl App {
             }
             Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
             Err(tokio::sync::oneshot::error::TryRecvError::Closed) => self.update_receiver = None,
+        }
+    }
+
+    // Non-blocking check for the stats fetch spawned in App::new() - a no-op once taken.
+    pub fn poll_stats(&mut self) {
+        let Some(rx) = self.stats_receiver.as_mut() else { return };
+        match rx.try_recv() {
+            Ok(summary) => {
+                self.stats_summary = summary;
+                self.stats_receiver = None;
+            }
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed) => self.stats_receiver = None,
         }
     }
 
@@ -3189,5 +3231,62 @@ mod library_row_tests {
             LibraryRow::Book(i) => format!("B:{i}"),
         }).collect();
         assert_eq!(row_kinds, vec!["H:Solo", "B:1", "B:0"]);
+    }
+}
+
+// While something plays, a finished episode has to drop out of the list and the playing
+// one's progress has to move promptly. Finishing doesn't push a signal to the main render
+// loop (the playback task is separate), so this periodic refresh is what notices.
+const PODCAST_REFRESH_ACTIVE: std::time::Duration = std::time::Duration::from_secs(8);
+// Idle, only another device or a new episode can change the list, so poll slowly.
+const PODCAST_REFRESH_IDLE: std::time::Duration = std::time::Duration::from_secs(60);
+// Playback's last progress sync can land after it stops; keep polling briefly.
+const PODCAST_REFRESH_AFTER_PLAYBACK: std::time::Duration = std::time::Duration::from_secs(30);
+
+fn podcast_refresh_due(
+    since_last_refresh: std::time::Duration,
+    is_playing: bool,
+    since_playing: Option<std::time::Duration>,
+    just_arrived_on_home: bool,
+) -> bool {
+    let recently_playing = since_playing.is_some_and(|d| d < PODCAST_REFRESH_AFTER_PLAYBACK);
+    let wait = if is_playing || recently_playing || just_arrived_on_home {
+        PODCAST_REFRESH_ACTIVE
+    } else {
+        PODCAST_REFRESH_IDLE
+    };
+    since_last_refresh >= wait
+}
+
+#[cfg(test)]
+mod podcast_refresh_tests {
+    use super::podcast_refresh_due;
+    use std::time::Duration;
+
+    const fn s(n: u64) -> Duration { Duration::from_secs(n) }
+
+    #[test]
+    fn idle_waits_a_minute() {
+        assert!(!podcast_refresh_due(s(59), false, None, false));
+        assert!(podcast_refresh_due(s(60), false, None, false));
+    }
+
+    #[test]
+    fn playing_refreshes_every_few_seconds() {
+        assert!(!podcast_refresh_due(s(7), true, Some(s(0)), false));
+        assert!(podcast_refresh_due(s(8), true, Some(s(0)), false));
+    }
+
+    #[test]
+    fn stays_fast_for_a_while_after_playback_stops() {
+        assert!(podcast_refresh_due(s(8), false, Some(s(29)), false));
+        assert!(!podcast_refresh_due(s(8), false, Some(s(30)), false));
+        assert!(!podcast_refresh_due(s(8), false, None, false));
+    }
+
+    #[test]
+    fn arriving_on_home_catches_up_quickly() {
+        assert!(podcast_refresh_due(s(8), false, None, true));
+        assert!(!podcast_refresh_due(s(7), false, None, true));
     }
 }
