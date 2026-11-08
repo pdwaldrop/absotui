@@ -1544,3 +1544,21 @@ is still at 0.11.6 (`pkgver` and the sha256 arrays need the usual bump, using th
 the bump, so `stable` stays on the bump commit, which is fine (no installed file changed). Still open from the scan: loading the library
 listing in the background (decided not to do it without a real report of slow startup), episode lists on first use instead of at startup,
 the memory plateau after repeated `R`, the series-grouped Library row rebuild, cover cache pruning.
+
+### 2026-11-07 — Claude Code (AUR draft bumped to 0.11.7)
+
+**What changed:** `packaging/aur-bin/PKGBUILD` and `.SRCINFO` (the unpublished draft `absotui-bin`) moved from 0.11.6 to 0.11.7. Only the two
+tarball checksums changed (x86_64 and aarch64); the example config, desktop file and icon are byte-identical to 0.11.6, so their checksums stay.
+Dependencies and the first-run message are unchanged.
+
+**How it was verified:** The five source files were downloaded fresh from the v0.11.7 release and hashed myself; all match the release's
+`SHA256SUMS.txt`. `.SRCINFO` regenerated with `makepkg --printsrcinfo`. `makepkg -f --nodeps` in a scratch copy validated all four checksums for
+the host architecture (config, desktop, icon, x86_64 tarball) and built `absotui-bin-0.11.7-1-x86_64.pkg.tar.zst`: it holds the binary, example
+config, desktop file and icon, `.PKGINFO` shows the same depend and optdepends as before, and the packaged binary reports 0.11.7 with no missing
+libraries. Scratch files were removed.
+
+**Not verified:** the aarch64 checksum beyond matching `SHA256SUMS.txt` and my own hash of the download (makepkg only builds the host
+architecture); an install into a clean Arch system; `namcap`; publishing (AUR registration was closed as of 2026-10-23, not rechecked).
+
+**Open questions / handoff:** `pkgver` and the two tarball checksums need the same bump on every release. Still true: the in-app Settings >
+Update/Uninstall would put a copy in `/usr/local/bin` that shadows a pacman-installed binary, which matters only once the package is published.
