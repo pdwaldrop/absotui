@@ -1406,3 +1406,98 @@ new "Security audit" workflow ran for the first time on GitHub (triggered becaus
 **Open questions / handoff:** Not released - no changelog entry; a v0.11.7 would carry the playback-start message and the smaller
 binary. The weekly audit will turn red if a new advisory is published against a dependency; the fix is a `cargo update` or, for a
 deliberate exception, an entry in `.cargo/audit.toml`. The still-open list is unchanged from the entry above.
+
+### 2026-11-07 — Claude Code (optimization scan after the open-actions commit, no code changes)
+
+**What changed:** Nothing in the repo (this entry only). Paul asked for a scan before the next release. Measured the current
+`main` (8c3c6db, release build) against a fake Audiobookshelf with its own config, port and mpv socket - Paul's two running
+instances, his config and his database were not touched; the only real-data reads were process stats (`ps`) and the shape of
+his log (line counts by tag).
+
+**Baseline (fast 24-core desktop, loopback; same-moment comparisons only):** first screen 0.12 s (600 books), key to screen
+~5 ms even when it swaps a cover image, `Q` to exit 10 ms, idle CPU 0.1-0.25% on every view, 39 MB memory. Playing a book
+through mpv for 3 minutes: 0.2% CPU, memory flat at 38.9 MB, 4 redraws/s (just the tick), one sync request per ~12 s, 482
+bytes of log. Paul's real instance after 2 h 24 m: 25 s of CPU in total (~0.3% average), 35.7 MB, a quiet log. Library size:
+5,000 books 50 MB, 20,000 books 105 MB; j/k stay ~5 ms; search typing ~0.4 ms per character at 20,000.
+
+**Findings, most valuable first:**
+1. *Startup (and `R`, and library switch) waits for the whole library listing and the listening stats.* `App::new` joins four
+   requests and the first screen waits for the slowest. Home itself is ready after ~0.2 s. With 50 ms latency on a 20 Mbit/s link
+   the first screen takes 0.56 s for 600 books but 3.7 s for 5,000 (the listing is 8.7 MB in my fake, ~1.7 KB per book), and the
+   same wait repeats on every `R`. On loopback it is invisible (0.12-0.21 s up to 20,000 books). The server ignores `minified=1`
+   in v2.37.1 (the listing always uses `toOldJSONMinified()`, read in the server source), so nothing to gain there. Options: fetch
+   the stats lazily or in the background (small), load the library listing in the background like the podcast episode lists
+   (medium - the Library arrays are parallel and filled together), and enable reqwest's `gzip` feature.
+2. *No compression and no User-Agent.* The client sends neither `Accept-Encoding` nor `User-Agent` (checked on the wire).
+   Audiobookshelf itself does not compress, so compression only helps behind a proxy that does (Caddy `encode`, nginx `gzip`,
+   Cloudflare); my fake's JSON gzips 30x but real libraries will be less repetitive, so treat that as an upper bound. A missing
+   User-Agent can make some proxies/WAFs refuse the request. Both are one-line client settings.
+3. *Podcast mode chats constantly.* The Home refresh runs every 8 s for as long as the app is open: one personalized request plus
+   one progress request per listed episode. Measured with a 22-show fake: 13 requests per refresh, 1.6 requests/s, ~5,900 per
+   hour per open instance (up to ~9,400 with 20 episodes listed; Paul has two instances open all day). CPU is negligible; the cost
+   is network and server chatter. Idea: refresh promptly when playback ends or stops, otherwise every ~60 s, and not while the view
+   isn't Home. Startup also fetches every show's full episode list in the background (22 requests, 15 MB for 22 shows x 300
+   episodes, ~0.1 s CPU) and again on every `R`; only needed for search and opening a show, so it could wait for first use.
+4. *Smaller:* after each `R` memory rises to a plateau - 5,000 books 51 -> 89 MB after ~8 reloads and flat after that (not a
+   leak: with `MALLOC_ARENA_MAX=1` it plateaus at 60 MB; glibc arenas on a 24-core machine). Series-grouped Library rebuilds its
+   row list every redraw: 1.4% idle CPU at 20,000 books (0.5% ungrouped, 0.5% at 5,000 grouped). The cover cache is never pruned
+   (~14-55 KB per cover; 309 covers = 17 MB for Paul). Idle redraws happen 4x/s even when nothing changed (0.1-0.25% CPU here,
+   would be a few % on a weak laptop CPU).
+
+**Checked and fine:** startup request chain is 3 round trips (ping+libraries, then personalized/items/collections/stats, then
+the progress lookups); no wake storms (draws stay at 4.1/s while playing); search is cheap at 20,000 books; token refresh runs every
+~50 min and a failure after resume from sleep recovered through the 15 s backoff; no stray log growth.
+
+**Not verified:** a real Audiobookshelf (response sizes and timings are from my fake; real stats/listing server time unknown),
+macOS, VLC (the playback scan used mpv), weak CPUs, the 2 s wait in terminals that never answer the image query (known, not fixable
+in the library). The podcast episode-list size per episode (2.3 KB) is my estimate of the real expanded shape.
+
+**Open questions / handoff:** Nothing is committed or changed in code. If Paul wants any of the above: the smallest worthwhile
+batch is stats off the startup path + reqwest `gzip` + a User-Agent + slower idle podcast refresh; the library-listing-in-background
+change is the one with real risk (parallel arrays) and only pays off for big libraries on slow links. `absotui.log.old` (49 MB,
+from the old 54 MB log, 2026-10-22) is still in Paul's config folder and can be deleted by him. Test-setup notes: a pty harness
+must answer the image query's last request (`ESC[5n` -> `ESC[0n`) or the library waits 2 s; to attach `eu-stack` to a child the
+harness must call `prctl(PR_SET_PTRACER, any)` first (ptrace_scope is 1), but `eu-stack` takes 1.7 s per sample so it is no use
+for sampling.
+
+### 2026-11-07 — Claude Code (the small network batch from the optimization scan, uncommitted)
+
+**What changed:** Paul asked for the "small batch" from the scan above. Four changes, all about network use:
+1. *Stats no longer hold up the first screen* (`src/app.rs`, `src/main.rs`, `src/ui/tui.rs`): the listening stats load in a
+   background task started in `App::new` and are merged by `poll_stats`; until they arrive the Stats screen shows "Loading your
+   listening stats..." instead of an all-zero page. A failed fetch is now logged (it was silent) and still gives the empty summary.
+2. *gzip*: reqwest's `gzip` feature is on, so API calls send `Accept-Encoding: gzip` and decode it. It only matters behind a proxy that
+   compresses (Audiobookshelf itself does not). The download client opts out (`no_gzip`, audio is not compressible and its resume uses
+   Range), and the ranged ID3 read for embedded covers sends `Accept-Encoding: identity` explicitly - tower-http only adds gzip when the
+   header is absent, and a compressed partial response would be useless. Three new crates in the lock: `async-compression`,
+   `compression-codecs`, `compression-core`.
+3. *User-Agent*: `absotui/<version>` on the API client, the download client and the two SSO clients (some proxies and firewalls refuse
+   a client that sends none). The GitHub update check keeps its own existing header.
+4. *Calmer podcast Home refresh* (`refresh_podcast_home_if_stale` now takes `is_playing`; the timing is the pure function
+   `podcast_refresh_due`): every 8 s while something plays and for 30 s after it stops (the last progress sync can land late, and a
+   finished episode has to drop out), and also when you arrive on Home from another screen; otherwise every 60 s.
+
+**How it was verified:** `cargo build`/`test` (146 passed: 139 plus 4 for the refresh timing, 3 for the client headers), the exact
+CI clippy command and `cargo audit` (exit 0) are clean. One test was mutation-checked: without the `identity` header the ranged-read
+test fails (it sees `accept-encoding: gzip`). Live, release build vs the installed v0.11.6, against a fake Audiobookshelf with its
+own config, ports and mpv (null audio) - Paul's instances, config and server were not touched:
+- First screen with a stats endpoint that takes 3 s: 3.05 s -> 0.12 s (three alternating runs each). The Stats screen shows the
+  loading line, then the same content as the old build (checked on the text: "Total: 99h39m ... Daysactive: 134"), about 3 s after launch.
+- Headers on the wire: old sent no `Accept-Encoding` and no `User-Agent`; new sends `gzip` and `absotui/0.11.6` on every API call,
+  the `/status` probe and `/login`; the download request carries the User-Agent and no `Accept-Encoding`. Against a server that gzips
+  JSON, the startup bytes went from 1.07 MB to 35 KB and everything still decoded and drew (my fake's JSON is very repetitive, so that
+  ratio is an upper bound; real libraries will compress less, and with a server that does not compress there is no change).
+- Podcast cadence over 290 s, new build: refreshes at 0, 60, 120 s idle; an immediate one when returning to Home at 140 s; every ~8 s
+  while playing (150-175 s); three more at ~8 s spacing after pressing stop; then the next at 259 s (60 s later). The old build refreshed
+  every 8.2 s while idle. That is 12 refreshes in 290 s instead of about 36, and the idle part drops to one per minute.
+
+**Not verified:** a real Audiobookshelf or a real proxy (gzip, the User-Agent, and the real stats timing are unknown - the 3 s stats
+delay is simulated); the ID3 range fetch on a live server (the fake's episodes carry no embedded-cover id, so only the unit test
+exercises it); macOS (CI covers it on push); VLC (the playback in the cadence run used mpv); the refresh cadence on a very slow link
+(a refresh that takes longer than 8 s just delays the next one, as before).
+
+**Open questions / handoff:** Not committed - waiting on Paul's go-ahead; no changelog entry yet (it would be a short "faster start on
+slow connections, fewer background requests in podcast mode" note in a v0.11.7 together with the earlier uncommitted-then-pushed
+hardening). Still open from the scan: the library listing still blocks the first screen on slow links (the real fix is loading it in
+the background, which touches the parallel arrays), the full episode lists are still fetched at startup and on `R` for every show,
+the memory plateau after repeated `R`, the series-grouped Library rebuilding its rows every redraw, and an unpruned cover cache.
