@@ -1344,3 +1344,50 @@ AppImage ran with `APPIMAGE_EXTRACT_AND_RUN`, not through FUSE; the upgrade on P
 `db.sqlite3` become owner-only the first time he runs this version. Still open: trimming the `image` crate's formats to drop the unmaintained `paste` warning,
 a scheduled `cargo audit` job, and the remaining major-version bumps (rusqlite 0.41, dirs 7, sha2 0.11, base64 0.23, getrandom 0.4; `magic-crypt` is gone).
 This entry is the only commit after the bump, so `stable` stays on the bump commit, which is fine (no installed file changed).
+
+### 2026-11-07 — Claude Code (the open actions after v0.11.6, uncommitted)
+
+**What changed:** Paul asked for every open action from the v0.11.6 handoff. All of it is uncommitted, waiting on his go-ahead.
+1. *The last audit warning is gone.* `paste` (unmaintained) came in through two image formats, EXR (`pulp`) and AVIF (`rav1e`), and
+   `ratatui-image`'s `image-defaults` feature switches on every `image` format. It is off now, and `image` is limited to
+   `jpeg, png, webp, gif, bmp`. Covers reach the app three ways (the Audiobookshelf cover endpoint, iTunes artwork URLs for podcast search,
+   ID3 pictures in episode MP3s), so those five cover everything realistic; all 309 covers in Paul's cache are WebP or JPEG. A cover in a
+   format that is no longer built (AVIF, EXR, TIFF, QOI...) would simply show no cover, like a missing one - `image::load_from_memory(..).ok()`
+   at the three decode sites. `cargo audit` is now fully clean, and the lock went from 535 to 481 packages.
+2. *The five major-version bumps:* rusqlite 0.41.1, dirs 7.0.0, sha2 0.11, base64 0.23, getrandom 0.4. Only rusqlite needed a code change
+   (`update_hook` now takes `&mut Connection`, so `open_db` has `let mut conn`). dirs 7's `lib.rs`, `lin.rs` and `mac.rs` are byte-identical to 6.0.0.
+3. *`.github/workflows/audit.yml`:* `cargo audit` every Monday, on pushes to `main` and PRs that touch `Cargo.lock`, and on demand, with a prebuilt
+   `cargo-audit` (`taiki-e/install-action`). A known vulnerability fails it; warnings are printed only. Ignored advisories would go in
+   `.cargo/audit.toml`. CLAUDE.md mentions it.
+4. *AUR draft:* `PKGBUILD` and `.SRCINFO` are at 0.11.6 with the checksums from the release's `SHA256SUMS.txt` (only the two tarballs changed).
+5. *Stray prints:* a failed playback start (book, episode, Home episode) used to `eprintln!` raw text onto the live screen and leave "Loading the
+   media..." stuck; it now shows "Couldn't start playback - check the server connection and try again" on the status row (the error was already
+   logged). Two decrypt errors in `App::new` and a database error in `select_default_usr` went from `println!` to the log. The two `eprintln!`s
+   left in `main.rs` run after `ratatui::restore()`, which is fine.
+6. *A test for item 1:* `covers_in_every_supported_format_decode` (in `cover_cache.rs`) decodes a tiny JPEG, PNG, lossy and lossless WebP, GIF and BMP.
+   It fails if a format is dropped (checked by removing GIF).
+
+**How it was verified:** `cargo build --locked`, `cargo test --locked` (139 passed: 138 plus the new one; five full runs and one single-threaded, all
+green) and the CI clippy command are clean; `cargo audit` reports nothing. Real data: a throwaway program built with exactly the new `image`
+features decoded all 309 covers in Paul's cache (147 JPEG, 162 WebP), read-only. Live against a fake Audiobookshelf with its own config, port and
+mpv socket (null audio; Paul's two running instances and his real config were not touched): login through the TUI saves `v2:` tokens with `.env` and
+the database at 0600; a restart goes straight to the library; with the server returning a plain-text 502, pressing play shows the new status line and
+logs the error; with the server healthy, play starts mpv, the position advances, syncs go out as numbers, `X` closes the session and saves progress,
+mpv exits, and the flags reset. A legacy login made by the REAL v0.11.5 release binary (downloaded, checksum-verified) is read and upgraded to `v2:`
+by the new build, and a database with blanked tokens no longer prints raw text on the screen (the cause is in the log). The scheduled job's logic
+was checked locally: a lock with vulnerabilities exits 1, a warning-only lock exits 0, `--deny warnings` exits 1, and `.cargo/audit.toml` ignores work.
+The AUR package was built with `makepkg` in a scratch copy: all four checksums pass, the package holds the four expected files, and the packaged
+binary reports 0.11.6.
+Size and build time (v0.11.6 sources in a throwaway worktree vs the current tree, both built cold with `cargo build --release --locked`, same machine): 24.22 MB -> 22.79 MB (-6%), 362 -> 312 compiled libraries, and the build time did not change (47 s vs 46 s here), so the gain is the clean audit and the smaller dependency set, not speed.
+
+**Not verified:** `audit.yml` itself running on GitHub (the install action and the cron trigger can only be exercised by pushing); macOS (CI covers
+it on push); the aarch64 AUR checksum beyond matching `SHA256SUMS.txt`; a cover in an unsupported format on a real server; Paul's real server and
+terminal with this build; a long real playback session; VLC (the live playback test used mpv).
+
+**Open questions / handoff:** Nothing here is released; no changelog entry yet (the only visible change is the status message, plus the
+smaller binary). Correction to the v0.11.6 release entry above: Paul's installed copy is already v0.11.6 (checked 2026-11-07 evening), so his
+`.env`/database are being tightened and his login upgraded by his own use. Still open, and deliberately not touched because each is a design
+decision or needs something I can't do: the status-message channel (background threads still print straight to the terminal), multi-track books
+re-downloading finished tracks when a later one fails, a player that never becomes reachable can't be stopped, the in-app updater putting a copy
+in `/usr/local/bin` that would shadow a pacman-installed binary (matters only once the AUR package is published; registration was closed), the
+unreproduced stray `L`/`J` cells, Paul's own calls (`R` keeping Home, `/` from the episode view, rustfmt), and issue #11's real-authentik test.

@@ -14,20 +14,20 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 ratatui = { version = "0.30.2", features = ["unstable-rendered-line-info"] }
 vlc-rc = "0.1.1"
 ratatui-textarea = "0.9.2"
-rusqlite = { version = "0.40.1", features = ["bundled", "hooks"] }
+rusqlite = { version = "0.41.1", features = ["bundled", "hooks"] }
 regex = "1.11.1"
 log = "0.4.25"
 fern = "0.7.1"
 chrono = "0.4.39"
 dotenvy = "0.15.7"
-dirs = "6.0.0"
+dirs = "7.0.0"
 clap = "4.5.37"
-ratatui-image = { version = "11.0.6", default-features = false, features = ["image-defaults", "crossterm"] }
-image = { version = "0.25.10", default-features = false, features = ["default-formats"] }
+ratatui-image = { version = "11.0.6", default-features = false, features = ["crossterm"] }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp"] }
 id3 = "1.17.0"
-base64 = "0.22"
-sha2 = "0.10"
-getrandom = "0.3"
+base64 = "0.23"
+sha2 = "0.11"
+getrandom = "0.4"
 pty-process = { version = "0.5.3", features = ["async"] }
 futures = "0.3"
 aes-gcm = { version = "0.11.1", default-features = false, features = ["aes", "alloc"] }

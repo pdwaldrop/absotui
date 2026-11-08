@@ -23,9 +23,12 @@ cargo run --release      # release build/run - what real installs use
 cargo test                # unit tests (a handful exist, e.g. src/utils/convert_seconds.rs, src/utils/encrypt_token.rs, src/api/me/get_media_progress.rs)
 cargo test <name>         # run a single test by name
 cargo clippy --all-targets
+cargo audit               # checks Cargo.lock against the RustSec advisory database (cargo install cargo-audit)
 ```
 
 `.github/workflows/ci.yml` runs `cargo build`, `cargo test` and `cargo clippy --all-targets -- -D warnings -A clippy::too_many_arguments` (all `--locked`) on Linux and macOS for every push to `main` and every pull request - it's the only thing that runs the tests, since `release.yml` just builds. Run the same three commands yourself before pushing so `main` doesn't go red. (Pushes made with `GITHUB_TOKEN`, like `cut-release`'s version bump, don't trigger it.)
+
+`.github/workflows/audit.yml` runs `cargo audit` every Monday and whenever `Cargo.lock` changes; a known vulnerability fails it, a warning (unmaintained or yanked crate) is only printed. Cover decoding is limited to JPEG, PNG, WebP, GIF and BMP (the `image` features in `Cargo.toml`) - that keeps the AVIF/EXR decoders, and the unmaintained `paste` crate behind them, out of the build; a test in `src/utils/cover_cache.rs` fails if one of those formats stops decoding.
 
 ### Actually exercising the app
 

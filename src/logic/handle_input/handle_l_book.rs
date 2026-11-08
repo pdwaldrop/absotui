@@ -1,6 +1,6 @@
 use crate::player::backend::Player;
 use crate::player::session::{PlayerSession, PlaybackStatus, Track, TrackSource};
-use crate::utils::pop_up_message::{clear_message, NEEDS_TERMINAL_CLEAR};
+use crate::utils::pop_up_message::{clear_message, pop_message, NEEDS_TERMINAL_CLEAR, PLAYBACK_START_FAILED};
 use std::sync::atomic::Ordering;
 use crate::api::me::update_media_progress::{update_media_progress_book, update_media_progress2_book};
 use crate::api::library_items::play_lib_item_or_pod::{post_start_playback_session_book, AudioTrack, find_track_index};
@@ -53,7 +53,7 @@ pub async fn handle_l_book(
                             ).await;
                         } else {
                             error!("[handle_l_book] Failed to start playback session: {e}");
-                            eprintln!("Failed to start playback session");
+                            let _ = pop_message(&mut stdout(), 3, PLAYBACK_START_FAILED);
                             // Without this, wait_prev_session_finished's poll loop (blocking
                             // every future play attempt until this flips back to "1") never
                             // sees it happen - a single transient failure here (network blip,

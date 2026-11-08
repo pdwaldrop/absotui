@@ -723,7 +723,7 @@ impl App {
                 )));
             }
             Err(e) => {
-                println!("Error: {e}");
+                warn!("[App::new] Couldn't decrypt the saved token: {e}");
             }
         }
 
@@ -741,7 +741,7 @@ impl App {
                 Ok(decrypted_refresh_token) => refresh_token = decrypted_refresh_token,
                 Err(e) => {
                     refresh_readable = false;
-                    println!("Error: {e}");
+                    warn!("[App::new] Couldn't decrypt the saved refresh token: {e}");
                 }
             }
         }

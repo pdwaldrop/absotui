@@ -46,7 +46,7 @@ fn open_db(db_path: PathBuf) -> Result<Rc<Connection>> {
             return Ok(cached.conn.clone());
         }
         crate::utils::private_files::create_private_or_restrict(&db_path);
-        let conn = Connection::open(&db_path)?;
+        let mut conn = Connection::open(&db_path)?;
         let _ = conn.busy_timeout(Duration::from_millis(500));
         conn.set_prepared_statement_cache_capacity(48);
         // The playback task and the UI share state only through this database, so any write
@@ -1062,7 +1062,7 @@ pub fn select_default_usr() -> Result<Vec<String>> {
                 result.push(user.refresh_token);
             }
             Err(e) => {
-                println!("Error occurred: {e}");
+                error!("[select_default_usr] {e}");
             }
         }
     }

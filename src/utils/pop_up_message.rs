@@ -18,6 +18,8 @@ use crossterm::{
 // `clear_message` sets it itself, so no caller can blank a row and forget the repaint.
 pub static NEEDS_TERMINAL_CLEAR: AtomicBool = AtomicBool::new(false);
 
+pub const PLAYBACK_START_FAILED: &str = "Couldn't start playback - check the server connection and try again";
+
 pub fn pop_message(stdout: &mut Stdout, lines_from_bottom: u16, message: &str) -> Result<()> {
     let (_cols, rows) = terminal::size()?;
     let target_row = rows.saturating_sub(lines_from_bottom);

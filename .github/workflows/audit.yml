@@ -1,0 +1,39 @@
+name: Security audit
+
+# Checks Cargo.lock against the RustSec advisory database. It runs weekly because an advisory
+# can be published against a dependency we haven't touched, and again whenever the lock changes.
+#
+# A known vulnerability fails the run. Advisories that are only warnings (a crate that is
+# unmaintained or yanked) are printed but don't. To make those fail too, add `--deny warnings`;
+# to accept one on purpose, list its id under `[advisories] ignore` in .cargo/audit.toml, with a
+# comment saying why.
+
+permissions:
+  contents: read
+
+on:
+  schedule:
+    - cron: "23 6 * * 1"
+  push:
+    branches: [main]
+    paths: [Cargo.lock]
+  pull_request:
+    paths: [Cargo.lock]
+  workflow_dispatch:
+
+jobs:
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Audit
+        run: cargo audit

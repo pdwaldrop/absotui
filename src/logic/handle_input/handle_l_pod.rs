@@ -4,7 +4,7 @@ use crate::api::me::update_media_progress::{update_media_progress_pod, update_me
 use crate::api::library_items::play_lib_item_or_pod::post_start_playback_session_pod;
 use crate::api::sessions::sync_open_session::sync_session;
 use crate::api::sessions::close_open_session::close_session_without_send_prg_data;
-use crate::utils::pop_up_message::{clear_message, NEEDS_TERMINAL_CLEAR};
+use crate::utils::pop_up_message::{clear_message, pop_message, NEEDS_TERMINAL_CLEAR, PLAYBACK_START_FAILED};
 use std::sync::atomic::Ordering;
 use std::io::stdout;
 use log::{info, error};
@@ -66,7 +66,7 @@ pub async fn handle_l_pod(
                 ).await;
             } else {
                 error!("[handle_l_pod] Failed to start playback session: {e}");
-                eprintln!("Failed to start playback session");
+                let _ = pop_message(&mut stdout(), 3, PLAYBACK_START_FAILED);
             }
             // Without this, wait_prev_session_finished's poll loop (blocking every
             // future play attempt until this flips back to "1") never sees it happen -
