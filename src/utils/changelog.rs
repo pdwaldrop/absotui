@@ -1433,8 +1433,7 @@ let changelog_84 = "Changelog Absotui v0.11.5 (22/10/2026) \n\
          \n\
          Enjoy!\n
          ####\n".to_string();
-let changelog_85 = format!(
-    "Changelog Absotui v{VERSION} (07/11/2026) \n\
+let changelog_85 = "Changelog Absotui v0.11.6 (07/11/2026) \n\
          \n\
          Changed:\n\
          - Your saved login is now protected by a modern, tamper-proof\n\
@@ -1458,10 +1457,49 @@ let changelog_85 = format!(
            which Absotui never read, so they could not have worked.\n\
          \n\
          Enjoy!\n
+         ####\n".to_string();
+let changelog_86 = format!(
+    "Changelog Absotui v{VERSION} (07/11/2026) \n\
+         \n\
+         Changed:\n\
+         - A slow Stats request no longer holds up the first screen. The\n\
+           listening stats now load in the background and the Stats screen\n\
+           says \"Loading your listening stats...\" until they arrive. With\n\
+           a server that took 3 seconds to answer that one request, the\n\
+           first screen went from 3.05 s to 0.12 s.\n\
+         - Far fewer background requests in podcast mode. Home used to\n\
+           re-check every listed episode with the server every 8 seconds,\n\
+           all day, for every open Absotui. It now does that every 8\n\
+           seconds only while something plays (and for 30 seconds after),\n\
+           and when you come back to Home from another screen; otherwise\n\
+           once a minute. In testing: 12 refreshes in about five minutes\n\
+           instead of about 36.\n\
+         - Absotui now asks the server for compressed responses and\n\
+           identifies itself as absotui/{VERSION}. Compression only helps if\n\
+           your server sits behind a proxy that compresses (Audiobookshelf\n\
+           itself does not); the name avoids proxies and firewalls that\n\
+           refuse a client that sends none. Audio downloads are never\n\
+           compressed.\n\
+         - Covers are decoded as JPEG, PNG, WebP, GIF or BMP, which covers\n\
+           what Audiobookshelf and podcast feeds serve. A cover in another\n\
+           format (AVIF, for example) shows no cover instead of a picture.\n\
+           This removed the last security-audit warning and made the\n\
+           program about 6% smaller.\n\
+         - Dependencies were updated (database, config folders, hashing,\n\
+           base64, random numbers).\n\
+         \n\
+         Fixed:\n\
+         - When playback couldn't start (the server was unreachable, for\n\
+           example), raw error text was printed over the screen and\n\
+           \"Loading the media...\" stayed up. It now shows \"Couldn't start\n\
+           playback - check the server connection and try again\".\n\
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_86);
     changelog.push_str(&changelog_85);
     changelog.push_str(&changelog_84);
     changelog.push_str(&changelog_83);
