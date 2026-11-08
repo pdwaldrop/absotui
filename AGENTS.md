@@ -1391,3 +1391,18 @@ decision or needs something I can't do: the status-message channel (background t
 re-downloading finished tracks when a later one fails, a player that never becomes reachable can't be stopped, the in-app updater putting a copy
 in `/usr/local/bin` that would shadow a pacman-installed binary (matters only once the AUR package is published; registration was closed), the
 unreproduced stray `L`/`J` cells, Paul's own calls (`R` keeping Home, `/` from the episode view, rustfmt), and issue #11's real-authentik test.
+
+### 2026-11-07 — Claude Code (the open actions after v0.11.6: committed and pushed)
+
+**What changed:** Nothing in the code. Closes the "uncommitted" note in the entry above: with Paul's go-ahead the work went to
+`main` as two commits, f6a84f8 (image formats trimmed, five major bumps, `audit.yml`, playback-start message, stray prints) and
+8c3c6db (AUR draft at 0.11.6). Before committing: fetched (nothing new upstream), `cargo build`/`test` (139 passed) and the CI
+clippy command clean, and `cargo audit` exits 0 with no warnings.
+
+**How it was verified:** After pushing, CI for 8c3c6db passed on both ubuntu-latest and macos-latest (build, test, clippy), and the
+new "Security audit" workflow ran for the first time on GitHub (triggered because the push changed `Cargo.lock`) and passed, so the
+`taiki-e/install-action` install of `cargo-audit` works there. The weekly cron trigger has not fired yet (first run Monday 06:23 UTC).
+
+**Open questions / handoff:** Not released - no changelog entry; a v0.11.7 would carry the playback-start message and the smaller
+binary. The weekly audit will turn red if a new advisory is published against a dependency; the fix is a `cargo update` or, for a
+deliberate exception, an entry in `.cargo/audit.toml`. The still-open list is unchanged from the entry above.
