@@ -1516,3 +1516,31 @@ for db4b4ba passed on both ubuntu-latest and macos-latest (build, test, clippy) 
 when the server is slow to answer the stats request, and far fewer background requests in podcast mode while idle (one refresh a minute
 instead of one every 8 s). Still open from the scan: loading the library listing in the background, fetching show episode lists on first
 use instead of at startup, the memory plateau after repeated `R`, the series-grouped Library row rebuild, and cover cache pruning.
+
+### 2026-11-07 — Claude Code (v0.11.7 release)
+
+**What changed:** Cut v0.11.7 (patch) at Paul's request. It carries everything on `main` since v0.11.6: the cover formats trimmed to
+JPEG/PNG/WebP/GIF/BMP (drops the last audit warning, binary about 6% smaller), the five major dependency bumps, the playback-start
+failure message, and the small network batch (stats in the background, gzip, `absotui/<version>` User-Agent, podcast Home refresh once a
+minute when idle). The v0.11.6 changelog entry was frozen to a plain string and a v0.11.7 one added (8e0e042) before cutting; the workflow's
+bump commit is 74ea319. The weekly `audit.yml`, CI changes and AUR draft are not user-facing and are not in the changelog.
+
+**How it was verified:** `cargo test` (146 passed), the CI clippy command and `cargo audit` clean; CI on the changelog push passed on ubuntu and
+macOS before the release was cut. Cut Release and Release workflows both succeeded; all 12 assets are on the release, downloaded into a fresh
+directory, and every file listed in `SHA256SUMS.txt` matches. The x86_64 binary and the x86_64 AppImage (run with
+`APPIMAGE_EXTRACT_AND_RUN`) report 0.11.7; all three binaries contain the new changelog text, the "Loading your listening stats" line and the
+frozen v0.11.6 entry. Highest glibc requirement, read from the ELF table, is unchanged: 2.34 (x86_64), 2.18 (aarch64); the macOS tarball is a
+universal binary. `main`, `stable` and the tag all sit on the bump commit, and the four files the installer fetches from `stable`
+(`hello_absotui.sh`, `config.example.toml`, `absotui.desktop`, `absotui.svg`) are byte-identical to the release assets. The released x86_64
+binary, run against a throwaway fake server with its own config, reached the first screen in 0.13 s and sent `User-Agent: absotui/0.11.7` and
+`Accept-Encoding: gzip` on all 11 requests.
+
+**Not verified:** a real `absotui --update` or fresh install from this release on any machine; the aarch64 and macOS binaries were inspected,
+not run; the AppImage was not run through FUSE; the release against Paul's real server, a real proxy, or a long real session; which Ubuntu
+the `ubuntu-latest` jobs ran on this time (not looked at; the build succeeded).
+
+**Open questions / handoff:** Paul's installed copy is still v0.11.6 until he runs `absotui --update`. The AUR draft in `packaging/aur-bin/`
+is still at 0.11.6 (`pkgver` and the sha256 arrays need the usual bump, using the new `SHA256SUMS.txt`). This entry is the only commit after
+the bump, so `stable` stays on the bump commit, which is fine (no installed file changed). Still open from the scan: loading the library
+listing in the background (decided not to do it without a real report of slow startup), episode lists on first use instead of at startup,
+the memory plateau after repeated `R`, the series-grouped Library row rebuild, cover cache pruning.
