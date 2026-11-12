@@ -210,6 +210,9 @@ Absotui works in any modern terminal, but cover art and the taskbar/dock icon de
 
 **Works best in:** **Kitty**, **Ghostty**, or **WezTerm**, which support both cover art and the taskbar/dock icon.
 
+### 💛 Sponsoring
+If Absotui is useful to you and you'd like to say thanks, you can [sponsor me on GitHub](https://github.com/sponsors/pdwaldrop). It's entirely optional - Absotui stays free and open source either way.
+
 ### 🙏 Credits
 Absotui began as a fork of [Toutui](https://github.com/AlbanDAVID/Toutui) by [AlbanDAVID](https://github.com/AlbanDAVID), archived in December 2025 ("I'm not able to properly maintain this project anymore... please don't wait for any new releases and issue fixing."). Thanks to the original author for getting it started. Toutui itself took its name from the French phrase "tout ouïe" ("all ears").
 
