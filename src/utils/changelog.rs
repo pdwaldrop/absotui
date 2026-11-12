@@ -1495,8 +1495,7 @@ let changelog_86 = "Changelog Absotui v0.11.7 (07/11/2026) \n\
          \n\
          Enjoy!\n
          ####\n".to_string();
-let changelog_87 = format!(
-    "Changelog Absotui v{VERSION} (11/11/2026) \n\
+let changelog_87 = "Changelog Absotui v0.11.8 (11/11/2026) \n\
          \n\
          Fixed:\n\
          - SSO sign-in could not be set up as described. The address\n\
@@ -1521,10 +1520,25 @@ let changelog_87 = format!(
            along with its outdated explanation.\n\
          \n\
          Enjoy!\n
+         ####\n".to_string();
+let changelog_88 = format!(
+    "Changelog Absotui v{VERSION} (12/11/2026) \n\
+         \n\
+         Changed:\n\
+         - The Now Playing box no longer has a blank row above the title.\n\
+           It only looked balanced with the key-binding line hidden; now\n\
+           it fits whatever it shows, so it looks even either way, and the\n\
+           list above it gets a row back.\n\
+         - The version now sits in the top-right of the header's border,\n\
+           across from the library name. On a very narrow terminal it\n\
+           moves back inside the box.\n\
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_88);
     changelog.push_str(&changelog_87);
     changelog.push_str(&changelog_86);
     changelog.push_str(&changelog_85);
