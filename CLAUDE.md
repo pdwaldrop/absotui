@@ -42,6 +42,7 @@ cargo audit               # checks Cargo.lock against the RustSec advisory datab
 
 `hello_absotui.sh`, `config.example.toml`, and `linux/absotui.{desktop,svg}` are served live from `stable` but verified against the latest release's frozen `SHA256SUMS.txt`, so a push to `stable` that touches any of them between releases would break every install/update ("Incorrect shasum"). `.github/workflows/sync-stable-assets.yml` prevents that by re-uploading the changed file and rewriting its manifest line whenever `stable` changes one of them - don't bypass it by editing release assets by hand.
 4. `gh run watch <id> --exit-status` on the resulting run(s) to confirm the binaries actually landed (`gh release view vX.Y.Z --json assets`).
+5. Bump the AUR draft in `packaging/aur-bin/` (Paul wants this on every release, no need to ask): set `pkgver`, take the checksums of any changed source (always the two tarballs; `config.example.toml`, the desktop file or the icon only when they changed) from the release's `SHA256SUMS.txt`, regenerate `.SRCINFO` with `makepkg --printsrcinfo`, build with `makepkg -f --nodeps` in a scratch copy to validate the checksums, then commit and push.
 
 ## Architecture
 

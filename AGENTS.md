@@ -50,6 +50,8 @@ doesn't have to rediscover it.
   not adopted. It was dry-run on CI and works (binary -43%, download -30%, no speed change), but the gain is
   cosmetic and it costs slower release builds (macOS about 10 min instead of 3.5) and function names in crash
   backtraces. Revisit only if binary size becomes a real problem (e.g. a distro package asks for it).
+- 2026-11-12 (Paul): Every release includes bumping the AUR draft (`packaging/aur-bin/`), committed and
+  pushed as part of cutting the release - no separate go-ahead needed. Steps are in CLAUDE.md's release section.
 
 ## Dialog
 
@@ -1696,3 +1698,20 @@ header border, Now Playing box without the blank row, and one row shorter with k
 
 **Open questions / handoff:** The AUR draft is at 0.11.8 (needs the usual `pkgver` and checksum bump for 0.11.9). #11 is waiting on the
 reporter's result with v0.11.8's sign-in address. This entry is the only commit after the bump, so `stable` stays on the bump commit.
+
+### 2026-11-12 — Claude Code (AUR draft bumped to 0.11.9; made part of every release)
+
+**What changed:** `packaging/aur-bin/PKGBUILD` and `.SRCINFO` (unpublished draft) moved from 0.11.8 to 0.11.9. Only the two
+tarball checksums changed; the example config, desktop file and icon are byte-identical to 0.11.8. Paul asked for this bump to
+happen on every release from now on, so it is now step 5 of CLAUDE.md's release section and a standing decision above.
+
+**How it was verified:** The five source files were downloaded fresh from v0.11.9 and hashed; all match the release's
+`SHA256SUMS.txt`. `.SRCINFO` regenerated with `makepkg --printsrcinfo`. `makepkg -f --nodeps` in a scratch copy passed all four
+checksums for the host architecture and built `absotui-bin-0.11.9-1-x86_64.pkg.tar.zst`: the same four files as before, the
+packaged binary reports 0.11.9 with no missing libraries (glibc 2.34), and `.PKGINFO` depends/optdepends are unchanged. Scratch
+files removed.
+
+**Not verified:** the aarch64 checksum beyond matching `SHA256SUMS.txt` and my own hash; a clean Arch install; `namcap`;
+publishing (AUR registration still closed as of Paul's 2026-11-08 check).
+
+**Open questions / handoff:** none new. #11 is still waiting on the reporter's result with v0.11.8's sign-in address.
