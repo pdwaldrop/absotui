@@ -1676,3 +1676,23 @@ Before/after screenshots rendered with `vhs` in Paul's Ghostty theme (Gruvbox pa
 **Not verified:** Paul's real terminal and server (the screenshots are xterm.js via vhs, not Ghostty), macOS.
 
 **Open questions / handoff:** Committed with Paul's go-ahead; going out in v0.11.9.
+
+### 2026-11-12 — Claude Code (v0.11.9 release)
+
+**What changed:** Cut v0.11.9 (patch) at Paul's request, carrying the header and Now Playing layout change (7adf1d1): the version sits in
+the header's top border, and the Now Playing box fits its content with no blank row. The v0.11.8 changelog entry was frozen and a v0.11.9 one
+added (e12a1b4); the workflow's bump commit is c3ee098.
+
+**How it was verified:** `cargo test` (151 passed) and the CI clippy command clean; CI passed on ubuntu and macOS for both pushes before the
+cut (the macOS job queued about ten minutes this time). Cut Release and Release succeeded on the first attempt; all 12 assets are on the
+release, downloaded fresh, and every file matches `SHA256SUMS.txt`. The x86_64 binary and AppImage report 0.11.9; all three binaries carry the
+new entry and the frozen v0.11.8 one. Highest glibc requirement unchanged: 2.34 (x86_64), 2.18 (aarch64); the macOS tarball is a universal
+binary. `main`, `stable` and the tag sit on the bump commit and the four files the installer fetches from `stable` are byte-identical to the
+release assets. The released x86_64 binary, playing a book through mpv against the fake server in a private tmux server: version in the
+header border, Now Playing box without the blank row, and one row shorter with key bindings hidden.
+
+**Not verified:** a real `absotui --update` or fresh install; the aarch64 and macOS binaries were inspected, not run; the AppImage ran with
+`APPIMAGE_EXTRACT_AND_RUN`, not through FUSE; Paul's real terminal and server.
+
+**Open questions / handoff:** The AUR draft is at 0.11.8 (needs the usual `pkgver` and checksum bump for 0.11.9). #11 is waiting on the
+reporter's result with v0.11.8's sign-in address. This entry is the only commit after the bump, so `stable` stays on the bump commit.
