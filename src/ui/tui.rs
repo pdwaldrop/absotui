@@ -14,7 +14,7 @@ use ratatui::{
 };
 use crate::utils::convert_seconds::{convert_seconds_for_prg, format_age, format_duration};
 use crate::utils::format_size::format_size;
-use crate::db::crud::{get_listening_session, get_is_podcast_autoplay, get_is_vlc_running, get_is_per_item_speed, get_is_auto_download};
+use crate::db::crud::{get_listening_session, get_is_podcast_autoplay, get_is_vlc_running, get_is_per_item_speed, get_is_auto_download, get_is_show_key_bindings};
 use crate::player::backend::Backend;
 use crate::player::integrated::player_info::{format_time, find_current_chapter};
 use crate::utils::html_to_text::html_to_lines;
@@ -1564,14 +1564,28 @@ impl App {
     }
 
     fn render_header(area: Rect, buf: &mut Buffer, library_name: String, username: &str, server_address_pretty: &str, version: &str, update_msg: &str) {
-        let block = theme::section_block(&library_name);
+        // The box has two content rows, so the version can't sit midway between them; it goes in
+        // the top border instead, mirroring the library name on the left. On a terminal too
+        // narrow for both titles it falls back to the first content row.
+        let version_title = Line::from(format!("🦜 Absotui v{version}"));
+        let borders_and_gap = 4;
+        let fits_in_border = Line::from(library_name.as_str()).width() + version_title.width() + borders_and_gap <= usize::from(area.width);
+        let mut block = theme::section_block(&library_name);
+        if fits_in_border {
+            block = block.title_top(version_title.right_aligned());
+        }
         let inner = block.inner(area);
         block.render(area, buf);
         Paragraph::new(format!("👋 Connected as {username}\n🔗 {server_address_pretty}"))
             .not_bold()
             .left_aligned()
             .render(inner, buf);
-        Paragraph::new(format!("🦜 Absotui v{version}\n {update_msg}"))
+        let right_column = if fits_in_border {
+            format!("\n{update_msg}")
+        } else {
+            format!("🦜 Absotui v{version}\n {update_msg}")
+        };
+        Paragraph::new(right_column)
             .right_aligned()
             .render(inner, buf);
     }
@@ -1632,10 +1646,11 @@ impl App {
         let content_rows = Self::footer_row_count(footer_text, area.width);
         let footer_height = if content_rows > 1 { content_rows + 1 } else { content_rows };
         self.last_footer_height = footer_height;
+        let player_height = player_tui::player_box_height(get_is_show_key_bindings(&self.username) == "1");
         Layout::vertical([
             Constraint::Length(4),
             Constraint::Fill(1),
-            Constraint::Length(6),
+            Constraint::Length(player_height),
             Constraint::Length(1),
             Constraint::Length(footer_height),
         ]).areas(area)

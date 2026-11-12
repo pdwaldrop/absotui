@@ -16,6 +16,13 @@ pub const PLAYER_KEYS: &[(&str, &str)] = &[
     ("O/I", "Spd +/−"), ("o/i", "Vol +/−"), ("T", "Real/content time"), ("X", "Stop"),
 ];
 
+/// Rows the Now Playing box takes: its title, details and (when shown) key-binding lines plus
+/// the two borders, with no blank rows so the content sits evenly inside it. `standard_layout`
+/// reserves exactly this much.
+pub fn player_box_height(show_key_bindings: bool) -> u16 {
+    if show_key_bindings { 5 } else { 4 }
+}
+
 pub fn render_player(area: Rect, buf: &mut ratatui::buffer::Buffer, player_info: Vec<String>, username: &str, footer_height: u16) {
     // player_info() only pushes the full 12 fields this function indexes into on a
     // successful `Ok(Some(session))` read (see src/player/integrated/player_info.rs) -
@@ -29,7 +36,8 @@ pub fn render_player(area: Rect, buf: &mut ratatui::buffer::Buffer, player_info:
         return;
     }
 
-    let block_height = 6; // 4 content rows (spacer/title/details/key-bindings) + border top/bottom
+    let show_key_bindings = get_is_show_key_bindings(username) == "1";
+    let block_height = player_box_height(show_key_bindings);
 
     // This box's position is independent of the App's own layout (it's drawn via a
     // separate code path in main.rs, not as part of `Widget for &mut App`) but has
@@ -56,16 +64,13 @@ pub fn render_player(area: Rect, buf: &mut ratatui::buffer::Buffer, player_info:
     let inner = block.inner(text_area);
     block.render(text_area, buf);
 
-    let [spacer_area, title_area, rest_area] = Layout::vertical([
+    let [title_area, rest_area] = Layout::vertical([
         Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(2),
+        Constraint::Fill(1),
     ]).areas(inner);
-    let _ = spacer_area; // left blank - nothing to render there
 
     let mut key_bindings_line = Line::default();
-    let is_show_key_bindings = get_is_show_key_bindings(username);
-    if is_show_key_bindings == "1" {
+    if show_key_bindings {
         key_bindings_line = theme::footer_line(PLAYER_KEYS);
     }
 
