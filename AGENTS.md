@@ -1562,3 +1562,53 @@ architecture); an install into a clean Arch system; `namcap`; publishing (AUR re
 
 **Open questions / handoff:** `pkgver` and the two tarball checksums need the same bump on every release. Still true: the in-app Settings >
 Update/Uninstall would put a copy in `/usr/local/bin` that shadows a pacman-installed binary, which matters only once the package is published.
+
+### 2026-11-11 — Claude Code (sponsoring set up; SSO sign-in address fixed, uncommitted)
+
+**What changed:**
+1. *Sponsoring (pushed as 8aa37cf with Paul's go-ahead):* `.github/FUNDING.yml` was the blank template left from Toutui, so no
+   Sponsor button could show; it now says `github: pdwaldrop`. The README has a short, optional "Sponsoring" note under Notes. Paul's
+   Sponsors page (github.com/sponsors/pdwaldrop) went public on 2026-11-08. The repo's Settings > General > Features > Sponsorships
+   checkbox is Paul's to tick.
+2. *SSO sign-in address (uncommitted):* the reporter on #11 tested v0.11.7 against authentik on 2026-11-10. Sign-in works, but
+   Audiobookshelf refused to save `http://127.0.0.1:41729/callback` as an allowed address, so they set the list to `*`. Cause, read in the
+   server source: its check for "Allowed Mobile Redirect URIs" is `^\w+://[\w\.-]+(/[\w\./-]*)*$`, which has no room for a port number,
+   and it is the same in every release from v2.10 to v2.37.2 (v2.7 was stricter still). So the address our README and our error message
+   told admins to add could never be saved, and `*` lets any address receive a sign-in (a crafted link could deliver someone's login to a
+   stranger). Upstream PR advplyr/audiobookshelf#5719 (opened 2026-11-11) touches the same check but still rejects ports.
+   Fix: the default address is now `http://127.0.0.1/callback` (no port), which the server accepts. Absotui listens on port 80 where the
+   system allows it (`try_listen`); otherwise (most Linux systems: unprivileged ports start at 1024) the sign-in screen says the browser
+   will show a "can't connect" page and asks for the address from its address bar, using the paste box that already existed. A failed
+   listen is no longer an error. `sso_callback_port` is now optional; 41729 (the old default, present in most config.toml files) and 80
+   count as unset; any other value is still honored for servers whose allowed list is `*`. If the server rejects an address with a port,
+   the message says to remove `sso_callback_port` and allow the port-less address. `config.example.toml`'s `[auth]` block has new text and
+   no key; `hello_absotui.sh` drops the five old `[auth]` lines (exact matches only) during an update, because its merge keeps any user line
+   the example lacks and the old comment described the port address. README's SSO section rewritten, including a warning against `*`.
+
+**How it was verified:** `cargo build`/`test` (151 passed: 146 plus a port-less default that passes a Rust copy of the server's check,
+a port address that fails it, the paste wording, an unavailable port giving no listener, the port error message, and the legacy 41729
+value) and the CI clippy command clean; `bash -n` on the installer. Installer merge, in a harness that runs the real `install_config`
+with network/checksum/player steps stubbed, three updates in a row each, output parsed with `tomllib`: the v0.11.7 example as installed
+(old lines removed, new text once, one `[auth]`, stable), the same with a custom port 41730 plus custom backend/count (all kept, old lines
+removed), a fresh install (stable from the second run; the first merge drops the `#### SIGN-IN ####` heading, which the unchanged
+installer also does), and a copy of Paul's own config.toml (read-only copy; nothing outside `[auth]` changed). Live, release build vs the
+installed v0.11.7, against a fake Audiobookshelf + identity provider that copies the server's flow (allowed-list check, session cookie,
+mobile redirect, PKCE verification) and a stub browser that follows the redirects with curl and records where it ends:
+- Default config: Absotui sent `http://127.0.0.1/callback`, the browser ended on it, the screen asked for the address, the paste signed in
+  ("Connected as ssouser", token stored as `v2:`), the server saw state, code and PKCE all match.
+- Old config with `sso_callback_port = 41729`, server offering password and SSO: username prompt offers SSO, port-less address sent,
+  junk and wrong-state pastes each got the hint on screen (read with a private tmux server), the real paste signed in.
+- Custom port 41730 with `*`: picked up by itself, no paste.
+- Address not allowed: message names `http://127.0.0.1/callback`, nothing saved. Port address not allowed: message says to remove
+  `sso_callback_port`. Esc while waiting: back to the login screen, nothing saved.
+- Installed v0.11.7 against a server allowing `http://127.0.0.1/callback`: sends the `:41729` address and is refused (the reported problem).
+- The sign-in screen at 80x24: the three-line instruction fits.
+
+**Not verified:** a real Audiobookshelf + real identity provider (the reporter's setup is the real test); a real browser (the stub is
+curl - real browsers keep the address in the bar on a "can't connect" page, but HTTPS-only modes were not tried); listening on port 80
+for real (impossible here; on macOS non-root programs can usually bind low ports, untested); macOS overall.
+
+**Open questions / handoff:** Needs Paul's go-ahead to commit and push; a release (v0.11.8) is what gets it to users, since the binary,
+`config.example.toml` and `hello_absotui.sh` all change (the stable-sync workflow handles the two files as usual). The reply on #11
+(asking the reporter to replace `*` with `http://127.0.0.1/callback` once the release is out) is drafted, waiting on Paul's approval. A
+comment on upstream #5719 asking for ports on loopback addresses is optional and also Paul's call.
