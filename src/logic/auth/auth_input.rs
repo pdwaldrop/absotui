@@ -46,7 +46,7 @@ fn probe_auth_methods(server_address: &str) -> Option<AuthMethods> {
 fn paste_box() -> TextArea<'static> {
     let mut textarea = TextArea::default();
     textarea.set_block(input_block(
-        "Browser can't reach this machine? Paste the address it ended up on, then Enter",
+        "Paste the address your browser ends up on, then Enter",
         "Esc to cancel.",
     ));
     textarea
@@ -58,7 +58,8 @@ fn draw_sso_screen(frame: &mut Frame, idp_url: &str, status: &str, paste: &TextA
     let x = area.x + (area.width - width) / 2;
     let inner_width = usize::from(width.saturating_sub(2)).max(1);
     let url_lines = idp_url.len().div_ceil(inner_width).max(1) as u16;
-    let info_height = (url_lines + 7).min(area.height.saturating_sub(3));
+    let status_lines = status.chars().count().div_ceil(inner_width).max(1) as u16;
+    let info_height = (url_lines + status_lines + 6).min(area.height.saturating_sub(3));
 
     let [_, info_area, paste_area, _] = Layout::vertical([
         Constraint::Fill(1),
@@ -249,7 +250,7 @@ impl AppLogin {
     /// it finishes so the user can cancel or paste an address; a failure is left in the
     /// database for the login screen that follows to show, same as a failed password login.
     fn sso_sign_in(&mut self, term: &mut LoginTerminal, server_address: String) -> io::Result<()> {
-        let port = self.config.auth.sso_callback_port;
+        let port = self.config.auth.callback_port();
         let (message_tx, mut message_rx) = mpsc::unbounded_channel::<SsoMessage>();
         let (paste_tx, paste_rx) = mpsc::unbounded_channel::<String>();
 

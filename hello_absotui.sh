@@ -529,6 +529,18 @@ MSG
     fi
 }
 
+# The [auth] lines the example config used to ship. They described a sign-in address with a
+# port, which Audiobookshelf never accepts; the merge below keeps any line the new example
+# lacks, so without this an update would leave them next to the new text.
+drop_obsolete_auth_lines() {
+    grep -vxF \
+        -e "# Signing in with SSO (OpenID Connect) receives the browser's redirect on your own" \
+        -e "# machine, at http://127.0.0.1:<this port>/callback. The Audiobookshelf admin has to" \
+        -e "# allow that exact address under Settings > Authentication > Allowed Mobile Redirect" \
+        -e "# URIs. Only change the port if something else on your machine is using it." \
+        -e "sso_callback_port = 41729" || true
+}
+
 install_config() {
     mkdir -p "$CONFIG_DIR" 2>/dev/null || ( echo "[ERROR] Cannot create config directory \"${CONFIG_DIR}\""; exit $EXIT_CONFIG )
 
@@ -585,6 +597,9 @@ install_config() {
                 # [player] didn't end it, so the next update wrote [auth] twice - a TOML error.)
                 local user_extracted_section=$(sed -En "/^(#### $section_uppercase|\[$section\])/{p;:loop n;/^####/q;/^\[$section\]/!{/^\[/q;};p;b loop;}" "$user_config")
                 local example_extracted_section=$(sed -En "/^(#### $section_uppercase|\[$section\])/{p;:loop n;/^####/q;/^\[$section\]/!{/^\[/q;};p;b loop;}" "$example_config")
+                if [[ "$section" == "auth" ]]; then
+                    user_extracted_section=$(drop_obsolete_auth_lines <<< "$user_extracted_section")
+                fi
                 # Now, merge user_extracted_section with example_extracted_section
                 local merged_section=
                 while read example_config_line; do

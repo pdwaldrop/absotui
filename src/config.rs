@@ -12,24 +12,20 @@ pub struct ConfigFile {
     pub auth: Auth,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct Auth {
-    #[serde(default = "default_sso_callback_port")]
-    pub sso_callback_port: u16,
+    #[serde(default)]
+    pub sso_callback_port: Option<u16>,
 }
 
-impl Default for Auth {
-    fn default() -> Self {
-        Auth { sso_callback_port: default_sso_callback_port() }
+impl Auth {
+    /// The port the SSO redirect comes back on, or `None` for the default port-less address.
+    /// The old default (41729) is still in most config.toml files and was never accepted by
+    /// Audiobookshelf, so it counts as unset, and so does 80, which is the default anyway.
+    pub fn callback_port(&self) -> Option<u16> {
+        use crate::api::server::oidc_login::LEGACY_SSO_PORT;
+        self.sso_callback_port.filter(|&port| port != LEGACY_SSO_PORT && port != 80)
     }
-}
-
-// Existing config.toml files predate SSO login, so `[auth]` is typically missing
-// entirely - `load_config` falls back to this same default when the section is absent.
-// The matching `http://127.0.0.1:<port>/callback` address is what a server admin has to
-// whitelist in Audiobookshelf, so changing this means changing that too.
-fn default_sso_callback_port() -> u16 {
-    crate::api::server::oidc_login::DEFAULT_SSO_PORT
 }
 
 #[derive(Debug, Deserialize)]
@@ -158,18 +154,26 @@ mod tests {
     }
 
     #[test]
-    fn example_config_parses_and_matches_the_built_in_sso_port() {
+    fn example_config_parses_and_uses_the_default_sso_address() {
         let config = parse(include_str!("../config.example.toml"));
-        let auth: Auth = config.get("auth").unwrap();
-        assert_eq!(auth.sso_callback_port, default_sso_callback_port());
+        let auth: Auth = config.get("auth").unwrap_or_default();
+        assert_eq!(auth.callback_port(), None);
         config.get::<Player>("player").unwrap();
+    }
+
+    #[test]
+    fn the_old_default_sso_port_counts_as_unset() {
+        let auth: Auth = parse("[auth]\nsso_callback_port = 41729\n").get("auth").unwrap();
+        assert_eq!(auth.callback_port(), None);
+        let auth: Auth = parse("[auth]\nsso_callback_port = 80\n").get("auth").unwrap();
+        assert_eq!(auth.callback_port(), None);
     }
 
     #[test]
     fn config_without_an_auth_section_falls_back_to_the_default_port() {
         let config = parse("[player]\ncvlc = \"1\"\ncvlc_term = \"0\"\naddress = \"localhost\"\nport = \"1234\"\n");
         let auth: Auth = config.get("auth").unwrap_or_default();
-        assert_eq!(auth.sso_callback_port, default_sso_callback_port());
+        assert_eq!(auth.callback_port(), None);
     }
 
     #[test]
@@ -205,6 +209,6 @@ mod tests {
     fn a_custom_sso_port_is_honored() {
         let config = parse("[auth]\nsso_callback_port = 50000\n");
         let auth: Auth = config.get("auth").unwrap();
-        assert_eq!(auth.sso_callback_port, 50000);
+        assert_eq!(auth.callback_port(), Some(50000));
     }
 }

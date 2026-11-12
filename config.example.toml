@@ -23,11 +23,12 @@ port = "1234"
 
 #### SIGN-IN ####
 [auth]
-# Signing in with SSO (OpenID Connect) receives the browser's redirect on your own
-# machine, at http://127.0.0.1:<this port>/callback. The Audiobookshelf admin has to
-# allow that exact address under Settings > Authentication > Allowed Mobile Redirect
-# URIs. Only change the port if something else on your machine is using it.
-sso_callback_port = 41729
+# Signing in with SSO (OpenID Connect) sends your browser back to this machine, at
+# http://127.0.0.1/callback. The Audiobookshelf admin has to allow that exact address
+# under Settings > Authentication > Allowed Mobile Redirect URIs. Where Absotui can't
+# listen on that address (most Linux systems), copy the address your browser ends up
+# on and paste it into Absotui. There's no port setting: Audiobookshelf can't be told
+# to allow an address with a port number.
 
 #### DOWNLOADS ####
 [downloads]

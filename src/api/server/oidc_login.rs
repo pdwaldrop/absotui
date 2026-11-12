@@ -1,6 +1,7 @@
 use crate::utils::http_client::USER_AGENT;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use color_eyre::eyre::{Report, Result};
+use log::info;
 use reqwest::{Client, StatusCode, Url, header, redirect};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -14,9 +15,13 @@ use tokio::sync::mpsc::UnboundedReceiver;
 // native-app OpenID flow: PKCE, with the browser redirected back to a loopback address.
 // Confirmed against the server's own `Auth.js` and `OidcAuthStrategy.js`, since the public
 // docs don't describe it. The server only accepts redirect addresses its admin has listed
-// under "Allowed Mobile Redirect URIs", so the port is fixed rather than random.
+// under "Allowed Mobile Redirect URIs", and its check for that list rejects any address with
+// a port number, so the default is the plain loopback address (port 80).
 
-pub const DEFAULT_SSO_PORT: u16 = 41729;
+/// The old default port. Audiobookshelf never accepted an address with it, but it was
+/// written into every config.toml, so it now means "use the default".
+pub const LEGACY_SSO_PORT: u16 = 41729;
+const DEFAULT_LISTEN_PORT: u16 = 80;
 const CALLBACK_PATH: &str = "/callback";
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -26,8 +31,11 @@ fn err(msg: impl Into<String>) -> Report {
     Report::new(std::io::Error::other(msg.into()))
 }
 
-pub fn redirect_uri(port: u16) -> String {
-    format!("http://127.0.0.1:{port}{CALLBACK_PATH}")
+pub fn redirect_uri(port: Option<u16>) -> String {
+    match port {
+        Some(port) => format!("http://127.0.0.1:{port}{CALLBACK_PATH}"),
+        None => format!("http://127.0.0.1{CALLBACK_PATH}"),
+    }
 }
 
 /// The address without surrounding whitespace or trailing slashes, so `{base}/login`
@@ -142,6 +150,12 @@ fn short(body: &str) -> String {
 
 fn authorization_error(status: StatusCode, body: &str, redirect_uri: &str) -> Report {
     if status == StatusCode::BAD_REQUEST && body.contains("Invalid redirect_uri") {
+        let default = self::redirect_uri(None);
+        if redirect_uri != default {
+            return err(format!(
+                "The server doesn't allow the sign-in address {redirect_uri}, and Audiobookshelf can't be told to allow an address with a port number. Remove sso_callback_port from [auth] in config.toml, ask the server admin to add {default} under Settings > Authentication > Allowed Mobile Redirect URIs, then try again."
+            ));
+        }
         return err(format!(
             "The server doesn't allow this sign-in address yet. Ask the server admin to add {redirect_uri} under Settings > Authentication > Allowed Mobile Redirect URIs in Audiobookshelf, then try again."
         ));
@@ -225,12 +239,17 @@ pub fn parse_pasted_callback(input: &str) -> Option<CallbackParams> {
     (params.code.is_some() || params.error.is_some()).then_some(params)
 }
 
-pub async fn bind_listener(port: u16) -> Result<TcpListener> {
-    TcpListener::bind(("127.0.0.1", port)).await.map_err(|e| {
-        err(format!(
-            "Couldn't listen on 127.0.0.1:{port} for the sign-in redirect ({e}). Is something else using that port? You can change `sso_callback_port` under [auth] in config.toml - the server admin then has to allow the matching address."
-        ))
-    })
+/// Listens for the browser's redirect where the system allows it. Port 80 usually needs extra
+/// permission on Linux; without a listener the user pastes the address instead.
+pub async fn try_listen(port: Option<u16>) -> Option<TcpListener> {
+    let port = port.unwrap_or(DEFAULT_LISTEN_PORT);
+    match TcpListener::bind(("127.0.0.1", port)).await {
+        Ok(listener) => Some(listener),
+        Err(e) => {
+            info!("[sso_login] Not listening on 127.0.0.1:{port} ({e}), waiting for a pasted address instead");
+            None
+        }
+    }
 }
 
 async fn read_request_target(stream: &mut TcpStream) -> Option<String> {
@@ -408,11 +427,20 @@ async fn wait_for_paste(
     std::future::pending().await
 }
 
+fn sign_in_status(browser_opened: bool, listening: bool) -> &'static str {
+    match (browser_opened, listening) {
+        (true, true) => "Opening your browser - finish signing in there...",
+        (false, true) => "Couldn't open a browser from here - open the link above in any browser.",
+        (true, false) => "Opening your browser. After you sign in it will show a \"can't connect\" page - that's expected. Copy the whole address from its address bar and paste it below.",
+        (false, false) => "Open the link above in any browser. After you sign in it will show a \"can't connect\" page - that's expected. Copy the whole address from its address bar and paste it below.",
+    }
+}
+
 /// The whole browser sign-in: start it with the server, send the browser to the identity
 /// provider, wait for the redirect (or a pasted address), and swap the code for tokens.
 pub async fn sso_login(
     server_address: &str,
-    port: u16,
+    port: Option<u16>,
     mut pasted: UnboundedReceiver<String>,
     mut on_update: impl FnMut(SsoUpdate),
 ) -> Result<SsoTokens> {
@@ -420,22 +448,21 @@ pub async fn sso_login(
     let pkce = generate_pkce()?;
     let redirect = redirect_uri(port);
 
-    let listener = bind_listener(port).await?;
+    let listener = try_listen(port).await;
     let session = begin_authorization(server_address, &redirect, &pkce, &state).await?;
 
     on_update(SsoUpdate::Url(session.idp_url.clone()));
-    on_update(SsoUpdate::Status(
-        if open_browser(&session.idp_url) {
-            "Opening your browser - finish signing in there..."
-        } else {
-            "Couldn't open a browser from here - open the link above in any browser."
-        }
-        .to_string(),
-    ));
+    let opened = open_browser(&session.idp_url);
+    on_update(SsoUpdate::Status(sign_in_status(opened, listener.is_some()).to_string()));
 
     let code = tokio::time::timeout(SIGN_IN_TIMEOUT, async {
         tokio::select! {
-            result = wait_for_callback(&listener, &state) => result,
+            result = async {
+                match &listener {
+                    Some(listener) => wait_for_callback(listener, &state).await,
+                    None => std::future::pending().await,
+                }
+            } => result,
             result = wait_for_paste(&mut pasted, &state, &mut on_update) => result,
         }
     })
@@ -475,9 +502,47 @@ mod tests {
         assert_ne!(a.verifier, b.verifier);
     }
 
+    // Audiobookshelf's own check for "Allowed Mobile Redirect URIs" (MiscController.js and
+    // authentication.vue, unchanged from v2.10 to v2.37): ^\w+://[\w\.-]+(/[\w\./-]*)*$
+    fn audiobookshelf_accepts(uri: &str) -> bool {
+        let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+        let Some((scheme, rest)) = uri.split_once("://") else { return false };
+        let (host, path) = rest.find('/').map_or((rest, ""), |i| rest.split_at(i));
+        !scheme.is_empty()
+            && scheme.chars().all(word)
+            && !host.is_empty()
+            && host.chars().all(|c| word(c) || c == '.' || c == '-')
+            && path.chars().all(|c| word(c) || c == '.' || c == '/' || c == '-')
+    }
+
     #[test]
-    fn redirect_uri_uses_loopback_ip_and_port() {
-        assert_eq!(redirect_uri(41729), "http://127.0.0.1:41729/callback");
+    fn default_redirect_is_one_audiobookshelf_lets_an_admin_allow() {
+        assert_eq!(redirect_uri(None), "http://127.0.0.1/callback");
+        assert!(audiobookshelf_accepts(&redirect_uri(None)));
+    }
+
+    #[test]
+    fn audiobookshelf_never_accepts_an_address_with_a_port() {
+        assert_eq!(redirect_uri(Some(41729)), "http://127.0.0.1:41729/callback");
+        assert!(!audiobookshelf_accepts(&redirect_uri(Some(41729))));
+        assert!(audiobookshelf_accepts("audiobookshelf://oauth"));
+    }
+
+    #[test]
+    fn sign_in_status_asks_for_the_address_only_without_a_listener() {
+        assert!(!sign_in_status(true, true).contains("paste"));
+        assert!(!sign_in_status(false, true).contains("paste"));
+        assert!(sign_in_status(true, false).contains("paste it below"));
+        assert!(sign_in_status(false, false).contains("paste it below"));
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_port_means_no_listener_instead_of_an_error() {
+        let taken = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = taken.local_addr().unwrap().port();
+        assert!(try_listen(Some(port)).await.is_none());
+        drop(taken);
+        assert!(try_listen(Some(port)).await.is_some());
     }
 
     #[test]
@@ -503,15 +568,15 @@ mod tests {
 
     #[test]
     fn authorize_url_carries_pkce_and_encodes_the_redirect() {
-        let url = authorize_url("https://abs.example.com/", "http://127.0.0.1:41729/callback", "CHAL", "STATE").unwrap();
+        let url = authorize_url("https://abs.example.com/", "http://127.0.0.1/callback", "CHAL", "STATE").unwrap();
         assert_eq!(url.path(), "/auth/openid");
         let query: Vec<(String, String)> = url.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect();
         assert!(query.contains(&("response_type".into(), "code".into())));
-        assert!(query.contains(&("redirect_uri".into(), "http://127.0.0.1:41729/callback".into())));
+        assert!(query.contains(&("redirect_uri".into(), "http://127.0.0.1/callback".into())));
         assert!(query.contains(&("code_challenge".into(), "CHAL".into())));
         assert!(query.contains(&("code_challenge_method".into(), "S256".into())));
         assert!(query.contains(&("state".into(), "STATE".into())));
-        assert!(url.as_str().contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A41729%2Fcallback"));
+        assert!(url.as_str().contains("redirect_uri=http%3A%2F%2F127.0.0.1%2Fcallback"));
     }
 
     #[test]
@@ -551,7 +616,7 @@ mod tests {
 
     #[test]
     fn pasted_input_accepts_a_full_address_or_just_the_query() {
-        let full = parse_pasted_callback("  http://127.0.0.1:41729/callback?code=C&state=S \n").unwrap();
+        let full = parse_pasted_callback("  http://127.0.0.1/callback?code=C&state=S \n").unwrap();
         assert_eq!((full.code.as_deref(), full.state.as_deref()), (Some("C"), Some("S")));
         let other_host = parse_pasted_callback("http://localhost:9999/whatever?code=C&state=S").unwrap();
         assert_eq!(other_host.code.as_deref(), Some("C"));
@@ -564,16 +629,23 @@ mod tests {
     #[test]
     fn pasted_input_without_a_code_or_error_is_rejected() {
         assert_eq!(parse_pasted_callback("hello there"), None);
-        assert_eq!(parse_pasted_callback("http://127.0.0.1:41729/callback"), None);
+        assert_eq!(parse_pasted_callback("http://127.0.0.1/callback"), None);
         assert_eq!(parse_pasted_callback(""), None);
     }
 
     #[test]
     fn rejected_redirect_names_the_exact_address_to_allow() {
-        let error = authorization_error(StatusCode::BAD_REQUEST, "Invalid redirect_uri", "http://127.0.0.1:41729/callback");
+        let error = authorization_error(StatusCode::BAD_REQUEST, "Invalid redirect_uri", "http://127.0.0.1/callback");
         let message = error.to_string();
-        assert!(message.contains("http://127.0.0.1:41729/callback"));
+        assert!(message.contains("add http://127.0.0.1/callback"));
         assert!(message.contains("Allowed Mobile Redirect URIs"));
+    }
+
+    #[test]
+    fn rejected_redirect_with_a_port_says_to_drop_the_port_setting() {
+        let message = authorization_error(StatusCode::BAD_REQUEST, "Invalid redirect_uri", "http://127.0.0.1:41730/callback").to_string();
+        assert!(message.contains("Remove sso_callback_port"));
+        assert!(message.contains("add http://127.0.0.1/callback"));
     }
 
     #[test]

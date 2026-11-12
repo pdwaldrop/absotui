@@ -160,11 +160,13 @@ Files installed — same as above (`.env`, `config.toml`, `absotui.log`, `db.sql
 
 If your Audiobookshelf server signs people in through an identity provider (authentik, Keycloak, ...), Absotui can too. Enter your server address as usual. If the server offers SSO next to passwords, leave the username empty; if it only offers SSO, Absotui goes straight to it. Your browser opens to your identity provider and you're signed in when you come back.
 
-**One-time setup for the server admin:** Absotui receives the sign-in on your own machine, at `http://127.0.0.1:41729/callback`. Audiobookshelf only accepts addresses it's been told about, so add that one under **Settings > Authentication > Allowed Mobile Redirect URIs**. If the Audiobookshelf mobile app already signs in with SSO on your server, nothing needs to change on the identity provider's side. Absotui tells you the exact address if the server turns it down.
+**One-time setup for the server admin:** Absotui receives the sign-in on your own machine, at `http://127.0.0.1/callback`. Audiobookshelf only accepts addresses it's been told about, so add exactly that one under **Settings > Authentication > Allowed Mobile Redirect URIs**. If the Audiobookshelf mobile app already signs in with SSO on your server, nothing needs to change on the identity provider's side. Absotui tells you the exact address if the server turns it down.
 
-Something else already using port 41729? Set `sso_callback_port` under `[auth]` in `config.toml`, and allow the matching address instead.
+Don't use `*` (allow any address) for this. It works, but it lets any address receive a sign-in, so a crafted link could hand someone's login to a stranger. Older Absotui versions used an address with a port number, which Audiobookshelf refuses to save; if you set `*` for that reason, replace it with the address above.
 
-Running over SSH, or on a machine without a browser? Absotui shows the sign-in link. Open it in any browser, and when that browser ends up on a page that won't load, copy the address from its address bar and paste it into the box on the Absotui screen.
+**On Linux,** Absotui usually can't listen on that address (it uses port 80, which needs extra permission), so after you sign in your browser shows a "can't connect" page. That's expected: copy the whole address from the browser's address bar and paste it into the box on the Absotui screen. Where Absotui can listen there, it picks the sign-in up by itself.
+
+Running over SSH, or on a machine without a browser? Same idea: Absotui shows the sign-in link. Open it in any browser, then paste the address the browser ends up on.
 
 This uses the same OpenID support as the Audiobookshelf mobile app, so it needs a reasonably recent server.
 
