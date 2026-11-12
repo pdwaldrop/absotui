@@ -1612,3 +1612,29 @@ for real (impossible here; on macOS non-root programs can usually bind low ports
 `config.example.toml` and `hello_absotui.sh` all change (the stable-sync workflow handles the two files as usual). The reply on #11
 (asking the reporter to replace `*` with `http://127.0.0.1/callback` once the release is out) is drafted, waiting on Paul's approval. A
 comment on upstream #5719 asking for ports on loopback addresses is optional and also Paul's call.
+
+### 2026-11-11 — Claude Code (v0.11.8 release)
+
+**What changed:** With Paul's go-ahead the SSO address fix went to `main` as e304ade (plus 84455a1, the dialog entry), and v0.11.8 (patch)
+was cut for it. The v0.11.7 changelog entry was frozen (both of its `{VERSION}` uses, the header and the User-Agent line, now read 0.11.7)
+and a v0.11.8 one added (30217af); it credits hntrhfr for the authentik test. The workflow's bump commit is 3fff772.
+
+**How it was verified:** `cargo test` (151 passed) and the CI clippy command clean; CI passed on ubuntu and macOS for both the fix and the
+changelog push before cutting. The first Release run failed on a network error ("socket hang up" uploading `config.example.toml` from the
+aarch64 job), which cancelled the macOS job and skipped the checksum job; nothing was half-uploaded. Re-running the failed jobs (same run,
+attempt 2) succeeded for all four. All 12 assets are on the release, downloaded fresh, and every file matches `SHA256SUMS.txt`. The x86_64
+binary and AppImage report 0.11.8; all three binaries contain the v0.11.8 entry, the frozen v0.11.7 entry and the new paste wording. Highest
+glibc requirement unchanged: 2.34 (x86_64), 2.18 (aarch64); the macOS tarball is a universal binary. `main`, `stable` and the tag sit on the bump
+commit, and the four files the installer fetches from `stable` are byte-identical to the release assets; the served installer contains the
+old-`[auth]`-line cleanup and the served example config has the new address and no `sso_callback_port`. The released x86_64 binary, against
+the fake Audiobookshelf + identity provider: default config signs in through the paste with `http://127.0.0.1/callback` (state, code and PKCE
+all checked, token stored as `v2:`, Home shown); a custom port with `*` signs in by itself.
+
+**Not verified:** a real `absotui --update` or fresh install from this release; the aarch64 and macOS binaries were inspected, not run; the
+AppImage ran with `APPIMAGE_EXTRACT_AND_RUN`, not through FUSE; SSO against a real Audiobookshelf, a real identity provider and a real browser.
+
+**Open questions / handoff:** The reply on #11 (ask the reporter to replace `*` with `http://127.0.0.1/callback` on v0.11.8) is drafted and
+waits on Paul's approval. The AUR draft is still at 0.11.7 (`pkgver` and the two tarball checksums). A comment on upstream
+advplyr/audiobookshelf#5719 about allowing ports on loopback addresses is optional, Paul's call. If a Release run fails again on an upload
+network error, re-running the failed jobs is safe: re-uploads replace assets of the same name, and the checksum job regenerates from what
+is actually on the release. This entry is the only commit after the bump, so `stable` stays on the bump commit.
