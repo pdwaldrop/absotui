@@ -1458,8 +1458,7 @@ let changelog_85 = "Changelog Absotui v0.11.6 (07/11/2026) \n\
          \n\
          Enjoy!\n
          ####\n".to_string();
-let changelog_86 = format!(
-    "Changelog Absotui v{VERSION} (07/11/2026) \n\
+let changelog_86 = "Changelog Absotui v0.11.7 (07/11/2026) \n\
          \n\
          Changed:\n\
          - A slow Stats request no longer holds up the first screen. The\n\
@@ -1475,7 +1474,7 @@ let changelog_86 = format!(
            once a minute. In testing: 12 refreshes in about five minutes\n\
            instead of about 36.\n\
          - Absotui now asks the server for compressed responses and\n\
-           identifies itself as absotui/{VERSION}. Compression only helps if\n\
+           identifies itself as absotui/0.11.7. Compression only helps if\n\
            your server sits behind a proxy that compresses (Audiobookshelf\n\
            itself does not); the name avoids proxies and firewalls that\n\
            refuse a client that sends none. Audio downloads are never\n\
@@ -1495,10 +1494,38 @@ let changelog_86 = format!(
            playback - check the server connection and try again\".\n\
          \n\
          Enjoy!\n
+         ####\n".to_string();
+let changelog_87 = format!(
+    "Changelog Absotui v{VERSION} (11/11/2026) \n\
+         \n\
+         Fixed:\n\
+         - SSO sign-in could not be set up as described. The address\n\
+           Absotui asked server admins to allow\n\
+           (http://127.0.0.1:41729/callback) is one Audiobookshelf refuses\n\
+           to save, because it doesn't accept an address with a port\n\
+           number. Absotui now uses http://127.0.0.1/callback, which it\n\
+           does accept: ask your server admin to allow exactly that\n\
+           address under Settings > Authentication > Allowed Mobile\n\
+           Redirect URIs. If the list was set to \"*\" to get around this,\n\
+           replace it - \"*\" lets any address receive a sign-in.\n\
+           Thanks to hntrhfr for testing SSO with authentik.\n\
+         \n\
+         Changed:\n\
+         - On most Linux systems Absotui can't listen on that address, so\n\
+           after you sign in your browser shows a \"can't connect\" page.\n\
+           That's expected: copy the whole address from the address bar\n\
+           and paste it into Absotui. Where it can listen, it picks the\n\
+           sign-in up by itself.\n\
+         - An old sso_callback_port = 41729 line in config.toml is now\n\
+           ignored, and updating through the install script removes it\n\
+           along with its outdated explanation.\n\
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_87);
     changelog.push_str(&changelog_86);
     changelog.push_str(&changelog_85);
     changelog.push_str(&changelog_84);
