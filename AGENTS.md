@@ -1638,3 +1638,21 @@ waits on Paul's approval. The AUR draft is still at 0.11.7 (`pkgver` and the two
 advplyr/audiobookshelf#5719 about allowing ports on loopback addresses is optional, Paul's call. If a Release run fails again on an upload
 network error, re-running the failed jobs is safe: re-uploads replace assets of the same name, and the checksum job regenerates from what
 is actually on the release. This entry is the only commit after the bump, so `stable` stays on the bump commit.
+
+### 2026-11-11 — Claude Code (reply posted on #11; AUR draft bumped to 0.11.8)
+
+**What changed:** With Paul's approval of the exact wording, the reply on #11 is posted (issuecomment-6815706538): it explains the
+port problem, asks the reporter to replace `*` with `http://127.0.0.1/callback` on v0.11.8, and describes the Linux paste step.
+`packaging/aur-bin/PKGBUILD` and `.SRCINFO` (unpublished draft) moved from 0.11.7 to 0.11.8. Three checksums changed this time: both tarballs
+and `config.example.toml`, which changed in this release; the desktop file and icon did not.
+
+**How it was verified:** The five source files were downloaded fresh from v0.11.8 and hashed myself; all match the release's `SHA256SUMS.txt`.
+`.SRCINFO` regenerated with `makepkg --printsrcinfo`. `makepkg -f --nodeps` in a scratch copy passed all four checksums for the host
+architecture and built `absotui-bin-0.11.8-1-x86_64.pkg.tar.zst`: the same four files as before, the packaged binary reports 0.11.8 with no
+missing libraries, `.PKGINFO` depends/optdepends unchanged, and the packaged example config has the new sign-in address. Scratch files removed.
+
+**Not verified:** the aarch64 checksum beyond matching `SHA256SUMS.txt` and my own hash; a clean Arch install; `namcap`; publishing (AUR
+registration is still closed - Paul's screenshot on 2026-11-08 showed "temporarily closed", HTTP 503, no manual queue).
+
+**Open questions / handoff:** Watch #11 for the reporter's result on v0.11.8 - it is the first real check of the port-less address and the
+paste step. `pkgver` and the checksums need the same bump on every release.
