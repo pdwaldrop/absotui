@@ -1656,3 +1656,23 @@ registration is still closed - Paul's screenshot on 2026-11-08 showed "temporari
 
 **Open questions / handoff:** Watch #11 for the reporter's result on v0.11.8 - it is the first real check of the port-less address and the
 paste step. `pkgver` and the checksums need the same bump on every release.
+
+### 2026-11-12 — Claude Code (header version and Now Playing box layout)
+
+**What changed:** Paul asked whether the version in the header and the Now Playing content would look better centered vertically.
+Header: its box has two content rows, so one line can't be centered; the version moved into the top border, right-aligned, mirroring
+the library name (it takes the border-title color), with a fallback to the old first-row position when both titles don't fit (long
+library name under about 50 columns). Now Playing: the box kept a blank spacer row above the title, which only looked centered with the
+key-binding line hidden; Paul keeps it on, so it was bottom-heavy. The box now fits its content: 5 rows with key bindings, 4 without
+(`player_box_height` in `player_tui.rs`, used by both `render_player` and `standard_layout`, so the reserved gap always matches). The list
+gains a row. No status-message row was affected: row 3 from the bottom is still the box's bottom border, and row 6 is only used on the
+login screen.
+
+**How it was verified:** `cargo test` (151 passed) and the CI clippy command clean. Live against a fake book library with real mpv
+playback (null audio) in a private tmux server: box drawn directly under its title border, toggling `B` shrinks and grows it with no stray
+lines, nothing-playing layout fine, header at 80/60/48 columns with a long library name (both titles fit) and the fallback below that.
+Before/after screenshots rendered with `vhs` in Paul's Ghostty theme (Gruvbox palette, JetBrains Mono) and shown to him.
+
+**Not verified:** Paul's real terminal and server (the screenshots are xterm.js via vhs, not Ghostty), macOS.
+
+**Open questions / handoff:** Committed with Paul's go-ahead; going out in v0.11.9.
