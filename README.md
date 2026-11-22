@@ -40,7 +40,7 @@ Absotui is a minimalist TUI built in Rust, for both audiobooks and podcasts. It 
 - **Manage podcast subscriptions:** add a show by name or a direct RSS URL (<kbd>A</kbd>), with cover art and a description shown as you browse the results, or remove one (<kbd>C</kbd>) and choose whether to keep or delete its downloaded files. It's all done from Library, with no separate screen
 - **Browse libraries:** flip through your Library, or jump to Collections and series (grouped, in sequence order) with <kbd>Tab</kbd>/<kbd>S</kbd>
 - **Listening stats:** a Stats page with streaks, a day-of-week chart, a year-long activity heat-map, recent sessions, and top lists for what and who you listen to most
-- **Stream or listen offline:** download (<kbd>d</kbd>) any book or episode for offline listening. A downloaded copy is used automatically when you have one, and Auto Download can keep your current listens downloaded for you
+- **Stream or listen offline:** download (<kbd>d</kbd>) any book or episode for offline listening. A downloaded copy is used automatically when you have one, and Auto Download can keep your current listens downloaded for you. Settings > Downloads lists everything you've downloaded, with sizes, and removes what you no longer need
 - **Cover art in your terminal:** book and episode artwork shown inline (Kitty/Ghostty/Sixel/iTerm2 terminals)
 - **Chapter navigation:** browse a book's chapter list inline in Continue Listening, with progress for each chapter
 - **Desktop integration:** a custom app icon, a taskbar/dock icon on supported terminals, and a window title showing what's playing

@@ -65,6 +65,15 @@ pub struct DownloadedItem {
     pub chapters: String,
 }
 
+/// A download as listed on Settings > Downloads.
+#[derive(Debug)]
+pub struct DownloadRow {
+    pub id_item: String,
+    pub kind: String,
+    pub is_auto: bool,
+    pub item: DownloadedItem,
+}
+
 /// One locally-saved audio file backing a downloaded book - mirrors `AudioTrack`
 /// (src/api/library_items/play_lib_item_or_pod.rs) but pointing at a file on disk
 /// instead of a server URL. A single-file book's download is simply the 1-entry case.

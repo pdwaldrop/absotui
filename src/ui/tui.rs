@@ -98,6 +98,7 @@ impl Widget for &mut App {
             AppView::SettingsPerItemSpeed => self.render_settings_per_item_speed(area, buf),
             AppView::SettingsAutoDownload => self.render_settings_auto_download(area, buf),
             AppView::SettingsPlayer => self.render_settings_player(area, buf),
+            AppView::SettingsDownloads => self.render_settings_downloads(area, buf),
             AppView::Keymap => self.render_keymap(area, buf),
             AppView::Collections => self.render_collections(area, buf),
             AppView::Stats => self.render_stats(area, buf),
@@ -971,11 +972,54 @@ impl App {
         App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
         App::render_footer(footer_area, buf, &text_render_footer);
         self.render_list(list_area, buf, render_list_title, &options, &mut self.list_state_settings_auto_download.clone(), None);
-        Paragraph::new(format!("Currently: {current}\n\nWhen on, the {count} most recently played books in Continue Listening, and every episode in Podcasts' New & Unfinished, are automatically downloaded for offline playback (press 'd' on Home to do this manually). Checked each time these lists refresh (opening the app, R, switching libraries - podcasts also refresh every few seconds on their own). Books that fall out of that top-{count} window, or episodes no longer new/unfinished, have their download removed automatically, so disk usage stays bounded rather than growing forever. Change the book count via `auto_download_count` under `[downloads]` in config.toml. Files are hours long, so turning this on can mean several hundred MB to a few GB downloading in the background the moment it's enabled or a new item becomes active."))
+        Paragraph::new(format!("Currently: {current}\n\nWhen on, the {count} most recently played books in Continue Listening, and every episode in Podcasts' New & Unfinished, are automatically downloaded for offline playback (press 'd' on Home to do this manually). Checked each time these lists refresh (opening the app, R, switching libraries - podcasts also refresh every few seconds on their own). Books that fall out of that top-{count} window, or episodes no longer new/unfinished, have their download removed automatically, so disk usage stays bounded rather than growing forever (downloads you made with 'd' are kept - see Settings > Downloads). Change the book count via `auto_download_count` under `[downloads]` in config.toml. Files are hours long, so turning this on can mean several hundred MB to a few GB downloading in the background the moment it's enabled or a new item becomes active."))
             .left_aligned()
             .wrap(Wrap { trim: true })
             .block(theme::section_block("Description"))
             .render(item_area, buf);
+    }
+
+    /// `AppView::SettingsDownloads` rendering
+    fn render_settings_downloads(&mut self, area: Rect, buf: &mut Buffer) {
+        let mut hints = vec![("h", "Back"), ("d", "Remove")];
+        hints.extend(Self::footer_trailer("Home", false));
+        let text_render_footer = theme::footer_text(&hints);
+        let [header_area, main_area, _player_area, _refresh_area, footer_area] = self.standard_layout(area, &text_render_footer);
+        let [list_area, info_area] = Layout::vertical([Constraint::Min(4), Constraint::Length(7)]).areas(main_area);
+
+        App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
+        App::render_footer(footer_area, buf, &text_render_footer);
+
+        let total: u64 = self.downloads_list.iter().map(|d| d.bytes).sum();
+        let title = format!("Downloads, all libraries [{}, {}]", self.downloads_list.len(), format_size(i64::try_from(total).unwrap_or(i64::MAX)));
+        let rows: Vec<String> = self.downloads_list.iter().map(|d| {
+            if d.by.is_empty() { d.title.clone() } else { format!("{} - {}", d.title, d.by) }
+        }).collect();
+        let sizes: Vec<(String, f32, bool)> = self.downloads_list.iter().map(|d| {
+            let size = format_size(i64::try_from(d.bytes).unwrap_or(i64::MAX));
+            (if d.is_auto { format!("{size} auto") } else { size }, 0.0, false)
+        }).collect();
+        self.render_list(list_area, buf, &title, &rows, &mut self.list_state_settings_downloads.clone(), Some(&sizes));
+
+        let selected = self.list_state_settings_downloads.selected().and_then(|i| self.downloads_list.get(i));
+        let info = match selected {
+            Some(d) => {
+                let kind = if d.is_book { "Book" } else { "Podcast episode" };
+                let made_by = if d.is_auto { "Auto Download" } else { "you (d on Home)" };
+                let files = match (d.files, d.missing_files) {
+                    (1, 0) => "1 file".to_string(),
+                    (n, 0) => format!("{n} files"),
+                    (n, missing) => format!("{n} files, {missing} missing on disk"),
+                };
+                format!("{kind} - {}\nDownloaded by: {made_by}\nSize: {} in {files}", d.by, format_size(i64::try_from(d.bytes).unwrap_or(i64::MAX)))
+            }
+            None => "Nothing downloaded yet.\n\n".to_string(),
+        };
+        Paragraph::new(format!("{info}\nd deletes the files. Automatic ones (marked auto) come back at Auto Download's next refresh while still listed."))
+            .left_aligned()
+            .wrap(Wrap { trim: true })
+            .block(theme::section_block("Info"))
+            .render(info_area, buf);
     }
 
     /// `AppView::SettingsPlayer` rendering
@@ -1532,6 +1576,12 @@ impl App {
             }
             AppView::SettingsAutoplay | AppView::SettingsPerItemSpeed | AppView::SettingsAutoDownload | AppView::SettingsPlayer => {
                 let mut hints = vec![("h", "Back to Settings"), ("l/→ Enter", "Apply selected option"), ("R", "Refresh")];
+                hints.extend(globals);
+                hints.extend(Self::footer_trailer("Home", false));
+                hints
+            }
+            AppView::SettingsDownloads => {
+                let mut hints = vec![("h", "Back to Settings"), ("d", "Remove selected download"), ("R", "Refresh")];
                 hints.extend(globals);
                 hints.extend(Self::footer_trailer("Home", false));
                 hints

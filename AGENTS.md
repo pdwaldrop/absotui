@@ -1781,3 +1781,31 @@ build opening v0.11.9's database added the column and marked its existing downlo
 Home, so a manual download whose book or episode leaves Home can no longer be removed from inside the app (true before
 this change too whenever Auto Download was off). A small Downloads list in Settings would close it. Remaining review
 findings 4-10 are untouched.
+
+### 2026-11-21 — Claude Code (Auto Download fix pushed; Settings > Downloads, uncommitted)
+
+**What changed:** The Auto Download fix from the entry above went to `main` as cccd194 with Paul's go-ahead (CI green on
+ubuntu and macOS). Then, at Paul's request, a new **Settings > Downloads** screen (between Auto Download and Player): every
+download the user has, from every library (books first, then episodes, each by title), with its size on disk and "auto"
+on the ones Auto Download made; the panel below shows the kind, the author or podcast, who downloaded it, size and file
+count (and how many files are missing on disk); `d` deletes the selected download's files and row. It closes the gap noted
+above - `d` only works on Home, so a download whose item had left Home couldn't be removed from inside the app. Deleting
+the item that is playing is refused ("Stop playback first..."). The list is loaded when the screen opens (sizes come from
+the files then, never per frame) and reloads by itself when a download is added or removed while it's open - a counter
+bumped by `insert_download`/`delete_download` (`downloads_version`), checked by `App::poll_downloads_list` in the main loop.
+The Auto Download description now says downloads made with `d` are kept, and README's offline bullet mentions the screen.
+
+**How it was verified:** `cargo build`/`test` (161 passed: 159 plus 2 new - listing order/kinds/tracks/users, and the
+on-disk size and missing-file count) and the CI clippy command are clean. Live against a throwaway fake server with its own
+config, runtime and mpv folders (mpv with null audio): the screen lists an automatic and a manual download with correct
+sizes, file counts and totals; a slow manual download started on Home appeared on the open screen by itself when it
+finished; `d` removed the row and files and moved the selection, and the last removal leaves "Nothing downloaded yet." with
+navigation keys still safe; with a downloaded book playing, `d` refused and kept it, and after stopping it removed it; the
+`?` keymap lists the screen's keys. An 80x24 terminal first squeezed the list to nothing (two fixed panels), so the
+details and help share one 7-row panel; checked at 80x24 and 120x36.
+
+**Not verified:** podcast episodes on the screen (same code path as books; the listing test includes an episode); macOS;
+a library with hundreds of downloads (sizes are one `stat` per file when the screen opens).
+
+**Open questions / handoff:** Not committed - waiting on Paul's go-ahead; it's a user-visible feature for the next release's
+changelog. Remaining review findings 4-10 are untouched.

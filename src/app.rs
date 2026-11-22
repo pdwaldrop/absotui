@@ -25,11 +25,11 @@ use crate::logic::handle_input::handle_l_pod_home::handle_l_pod_home;
 use crate::logic::handle_input::handle_add_podcast::create_and_seed_podcast;
 use crate::logic::server_recovery::{diagnose_rejected_login, LoginProblem};
 use crate::config::{ConfigFile, load_config, set_backend};
-use crate::db::crud::{get_is_show_key_bindings, update_is_show_key_bindings, get_is_speed_adjusted_time, update_is_speed_adjusted_time, update_is_podcast_autoplay, delete_user, update_id_selected_lib, get_listening_session, get_is_vlc_running, update_is_per_item_speed, update_is_finished, get_is_auto_download, update_is_auto_download, update_pending_seek, update_login_err, update_user_tokens};
+use crate::db::crud::{downloads_version, get_is_show_key_bindings, update_is_show_key_bindings, get_is_speed_adjusted_time, update_is_speed_adjusted_time, update_is_podcast_autoplay, delete_user, update_id_selected_lib, get_listening_session, get_is_vlc_running, update_is_per_item_speed, update_is_finished, get_is_auto_download, update_is_auto_download, update_pending_seek, update_login_err, update_user_tokens};
 use crate::api::server::refresh_token::{maybe_refresh_token, refresh_now, sync_clock_with_server, RefreshOutcome};
 use crate::db::database_struct::Database;
 use crate::utils::convert_seconds::format_duration;
-use crate::utils::download_cache::{is_downloaded, remove_download, download_book, download_episode, sync_auto_downloads, sync_auto_downloads_podcasts};
+use crate::utils::download_cache::{is_downloaded, remove_download, download_book, download_episode, sync_auto_downloads, sync_auto_downloads_podcasts, list_downloads_on_disk, DownloadEntry};
 use color_eyre::Result;
 use color_eyre::eyre::Report;
 use futures::stream::{self, StreamExt};
@@ -84,6 +84,7 @@ pub enum AppView {
     SettingsAutoplay,
     SettingsPerItemSpeed,
     SettingsAutoDownload,
+    SettingsDownloads,
     SettingsPlayer,
     // Full keybind reference for whichever screen it was opened from (see
     // `keymap_return_view`) - bound to `?`, matching CLIAMP/superfile's own
@@ -200,6 +201,10 @@ pub struct App {
     pub list_state_settings_per_item_speed: ListState,
     pub list_state_settings_auto_download: ListState,
     pub list_state_settings_player: ListState,
+    pub list_state_settings_downloads: ListState,
+    // Settings > Downloads rows, loaded when the screen opens and whenever a download is added or removed.
+    pub downloads_list: Vec<DownloadEntry>,
+    pub downloads_list_version: u64,
     pub _titles_cnt_list: Vec<String>,
     pub auth_names_cnt_list: Vec<String>,
     pub pub_year_cnt_list: Vec<String>,
@@ -636,15 +641,17 @@ pub(crate) const SETTINGS_LIBRARY: &str = "Library";
 pub(crate) const SETTINGS_PER_ITEM_SPEED: &str = "Per-Item Speed";
 pub(crate) const SETTINGS_PODCAST_AUTOPLAY: &str = "Podcast Autoplay";
 pub(crate) const SETTINGS_AUTO_DOWNLOAD: &str = "Auto Download";
+pub(crate) const SETTINGS_DOWNLOADS: &str = "Downloads";
 pub(crate) const SETTINGS_PLAYER: &str = "Player";
 pub(crate) const SETTINGS_UPDATE_UNINSTALL: &str = "Update/Uninstall";
 pub(crate) const SETTINGS_ABOUT: &str = "About";
 pub(crate) const SETTINGS_ACCOUNT: &str = "Account";
-const SETTINGS_ENTRIES: [&str; 8] = [
+const SETTINGS_ENTRIES: [&str; 9] = [
     SETTINGS_LIBRARY,
     SETTINGS_PER_ITEM_SPEED,
     SETTINGS_PODCAST_AUTOPLAY,
     SETTINGS_AUTO_DOWNLOAD,
+    SETTINGS_DOWNLOADS,
     SETTINGS_PLAYER,
     SETTINGS_UPDATE_UNINSTALL,
     SETTINGS_ABOUT,
@@ -677,6 +684,36 @@ impl App {
     /// Settings > Player: saves the choice to config.toml and switches `self.player` to
     /// it. Refused while something is playing (the running session belongs to the other
     /// player) or when the chosen program isn't installed.
+    fn reload_downloads_list(&mut self) {
+        self.downloads_list_version = downloads_version();
+        self.downloads_list = list_downloads_on_disk(&self.username);
+        let last = self.downloads_list.len().checked_sub(1);
+        let selected = self.list_state_settings_downloads.selected().unwrap_or(0);
+        self.list_state_settings_downloads.select(last.map(|last| selected.min(last)));
+    }
+
+    /// Reloads Settings > Downloads when a download is added or removed while it's open.
+    pub fn poll_downloads_list(&mut self) {
+        if self.view_state == AppView::SettingsDownloads && downloads_version() != self.downloads_list_version {
+            self.reload_downloads_list();
+        }
+    }
+
+    fn remove_selected_download(&mut self) {
+        let Some(entry) = self.list_state_settings_downloads.selected().and_then(|i| self.downloads_list.get(i)).cloned() else { return };
+        if get_is_vlc_running(&self.username) == "1"
+            && let Ok(Some(session)) = get_listening_session()
+            && (session.id_item == entry.id_item || session.id_pod == entry.id_item) {
+                let _ = pop_message(&mut stdout(), 3, "Stop playback first, then remove this download");
+                return;
+        }
+        if let Err(e) = remove_download(&self.username, &entry.id_item) {
+            error!("[remove_selected_download] {}: {e}", entry.id_item);
+            let _ = pop_message(&mut stdout(), 3, &format!("Couldn't remove the download: {e}"));
+        }
+        self.reload_downloads_list();
+    }
+
     fn apply_player_backend(&mut self, backend: Backend) {
         let mut stdout = stdout();
         if get_is_vlc_running(&self.username) == "1" {
@@ -1183,6 +1220,7 @@ impl App {
     list_state_settings_auto_download.select(Some(0));
     let mut list_state_settings_player = ListState::default();
     list_state_settings_player.select(Some(0));
+    let list_state_settings_downloads = ListState::default();
 
     Ok(Self {
         database,
@@ -1204,6 +1242,9 @@ impl App {
         list_state_settings_per_item_speed,
         list_state_settings_auto_download,
         list_state_settings_player,
+        list_state_settings_downloads,
+        downloads_list: Vec::new(),
+        downloads_list_version: 0,
         _titles_cnt_list,
         auth_names_cnt_list,
         pub_year_cnt_list,
@@ -2035,6 +2076,8 @@ pub fn handle_key(&mut self, key: KeyEvent) {
             }
         }
 
+        KeyCode::Char('d') if matches!(self.view_state, AppView::SettingsDownloads) => self.remove_selected_download(),
+
         // Download (or remove the local copy of) the selected book, or podcast episode,
         // for offline playback - see src/utils/download_cache.rs.
         KeyCode::Char('d') if !self.is_podcast && matches!(self.view_state, AppView::Home) => {
@@ -2229,6 +2272,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                 AppView::SettingsAutoplay => {self.view_state = AppView::Settings}
                 AppView::SettingsPerItemSpeed => {self.view_state = AppView::Settings}
                 AppView::SettingsAutoDownload => {self.view_state = AppView::Settings}
+                AppView::SettingsDownloads => {self.view_state = AppView::Settings}
                 AppView::SettingsPlayer => {self.view_state = AppView::Settings}
                 AppView::Settings => {self.view_state = AppView::Home}
                 AppView::PodcastEpisode => {
@@ -2413,6 +2457,10 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                         self.view_state = AppView::SettingsUpdateUninstall;
                     } else if selected == self.settings_index(SETTINGS_AUTO_DOWNLOAD) {
                         self.view_state = AppView::SettingsAutoDownload;
+                    } else if selected == self.settings_index(SETTINGS_DOWNLOADS) {
+                        self.reload_downloads_list();
+                        self.list_state_settings_downloads.select(if self.downloads_list.is_empty() { None } else { Some(0) });
+                        self.view_state = AppView::SettingsDownloads;
                     } else if selected == self.settings_index(SETTINGS_PLAYER) {
                         self.list_state_settings_player.select(Some(match self.config.player.backend {
                             Backend::Vlc => 0,
@@ -2458,6 +2506,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                         self.apply_player_backend(if index == 0 { Backend::Vlc } else { Backend::Mpv });
                     }
                 }
+                AppView::SettingsDownloads => {}
                 AppView::SettingsLibrary => {
                     if let Some(index) = selected_settings_library {
                         let new_selected_lib = &self.libraries_ids[index];
@@ -2676,6 +2725,7 @@ fn toggle_view(&mut self) {
         AppView::SettingsAutoplay => AppView::Home,
         AppView::SettingsPerItemSpeed => AppView::Home,
         AppView::SettingsAutoDownload => AppView::Home,
+        AppView::SettingsDownloads => AppView::Home,
         AppView::SettingsPlayer => AppView::Home,
         // Tab deliberately falls through to here from the Keymap guard in
         // handle_key - this is what makes Tab close Keymap back to Home.
@@ -2871,6 +2921,12 @@ pub fn select_next(&mut self) {
             } else {
                 self.list_state_settings_auto_download.select_first();
             }}}
+        AppView::SettingsDownloads => { if let Some(selected) = self.list_state_settings_downloads.selected() {
+            if selected + 1 < self.downloads_list.len() {
+                self.list_state_settings_downloads.select_next();
+            } else {
+                self.list_state_settings_downloads.select_first();
+            }}}
         AppView::SettingsPlayer => { if let Some(selected) = self.list_state_settings_player.selected() {
             if selected + 1 < 2 {
                 self.list_state_settings_player.select_next();
@@ -2964,6 +3020,12 @@ pub fn select_previous(&mut self) {
             } else {
                 self.list_state_settings_auto_download.select(Some(1));
             }}}
+        AppView::SettingsDownloads => { if let Some(selected) = self.list_state_settings_downloads.selected() {
+            if selected > 0 {
+                self.list_state_settings_downloads.select_previous();
+            } else {
+                self.list_state_settings_downloads.select(self.downloads_list.len().checked_sub(1));
+            }}}
         AppView::SettingsPlayer => { if let Some(selected) = self.list_state_settings_player.selected() {
             if selected > 0 {
                 self.list_state_settings_player.select_previous();
@@ -3000,6 +3062,7 @@ pub fn select_first(&mut self) {
         AppView::SettingsAutoplay => self.list_state_settings_autoplay.select_first(),
         AppView::SettingsPerItemSpeed => self.list_state_settings_per_item_speed.select_first(),
         AppView::SettingsAutoDownload => self.list_state_settings_auto_download.select_first(),
+        AppView::SettingsDownloads => self.list_state_settings_downloads.select(if self.downloads_list.is_empty() { None } else { Some(0) }),
         AppView::SettingsPlayer => self.list_state_settings_player.select_first(),
         AppView::Keymap => {}
         AppView::Stats => {}
@@ -3039,6 +3102,7 @@ pub fn select_last(&mut self) {
         AppView::SettingsAutoplay => self.list_state_settings_autoplay.select(Some(1)),
         AppView::SettingsPerItemSpeed => self.list_state_settings_per_item_speed.select(Some(1)),
         AppView::SettingsAutoDownload => self.list_state_settings_auto_download.select(Some(1)),
+        AppView::SettingsDownloads => self.list_state_settings_downloads.select(self.downloads_list.len().checked_sub(1)),
         AppView::SettingsPlayer => self.list_state_settings_player.select(Some(1)),
         AppView::Keymap => {}
         AppView::Stats => {}

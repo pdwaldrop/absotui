@@ -11,7 +11,8 @@ use reqwest::{Client, Response, StatusCode};
 use tokio::io::AsyncWriteExt;
 use crate::api::library_items::play_lib_item_or_pod::{post_start_playback_session_book, post_start_playback_session_pod, AudioTrack};
 use crate::api::sessions::close_open_session::close_session_without_send_prg_data;
-use crate::db::crud::{insert_download, delete_download, get_download, list_auto_downloaded_ids};
+use crate::db::crud::{insert_download, delete_download, get_download, list_auto_downloaded_ids, list_downloads};
+use crate::db::database_struct::DownloadRow;
 use crate::db::database_struct::DownloadedTrack;
 use crate::utils::http_client::download_client;
 
@@ -316,6 +317,49 @@ pub fn remove_download(username: &str, item_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// One row of Settings > Downloads.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DownloadEntry {
+    pub id_item: String,
+    pub title: String,
+    // A book's author, or an episode's podcast.
+    pub by: String,
+    pub is_book: bool,
+    pub is_auto: bool,
+    pub bytes: u64,
+    pub files: usize,
+    pub missing_files: usize,
+}
+
+fn entry_on_disk(row: DownloadRow) -> DownloadEntry {
+    let mut paths: Vec<String> = row.item.tracks.into_iter().map(|t| t.local_path).collect();
+    if !row.item.file_path.is_empty() && !paths.contains(&row.item.file_path) {
+        paths.push(row.item.file_path);
+    }
+    let sizes: Vec<Option<u64>> = paths.iter().map(|p| std::fs::metadata(p).ok().map(|m| m.len())).collect();
+    DownloadEntry {
+        id_item: row.id_item,
+        title: row.item.title,
+        by: row.item.author,
+        is_book: row.kind != "podcast",
+        is_auto: row.is_auto,
+        bytes: sizes.iter().flatten().sum(),
+        files: paths.len(),
+        missing_files: sizes.iter().filter(|s| s.is_none()).count(),
+    }
+}
+
+/// Every download a user has, with its size on disk - for Settings > Downloads.
+pub fn list_downloads_on_disk(username: &str) -> Vec<DownloadEntry> {
+    match list_downloads(username) {
+        Ok(rows) => rows.into_iter().map(entry_on_disk).collect(),
+        Err(e) => {
+            error!("[list_downloads_on_disk] {e}");
+            Vec::new()
+        }
+    }
+}
+
 /// Settings > Auto Download: keeps the local download set mirroring the `count` most
 /// recently played books in Continue Listening (`ids` is already server-ordered
 /// most-recent-first) - downloads any of them not already downloaded, and removes any
@@ -467,6 +511,41 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn row(file_path: &str, tracks: Vec<&str>) -> DownloadRow {
+        DownloadRow {
+            id_item: "id".into(),
+            kind: "book".into(),
+            is_auto: false,
+            item: crate::db::database_struct::DownloadedItem {
+                file_path: file_path.into(),
+                duration: "1".into(),
+                title: "T".into(),
+                author: "A".into(),
+                tracks: tracks.into_iter().map(|p| DownloadedTrack { local_path: p.into(), duration: 1.0, start_offset: 0.0 }).collect(),
+                chapters: String::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn a_download_entry_adds_up_its_files_and_counts_missing_ones() {
+        let dir = std::env::temp_dir().join(format!("absotui-dl-entry-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = dir.join("a.mp3");
+        let b = dir.join("b.mp3");
+        std::fs::write(&a, vec![0u8; 300]).unwrap();
+        std::fs::write(&b, vec![0u8; 200]).unwrap();
+        let (a, b) = (a.to_string_lossy().into_owned(), b.to_string_lossy().into_owned());
+        let missing = dir.join("gone.mp3").to_string_lossy().into_owned();
+
+        let entry = entry_on_disk(row(&a, vec![&a, &b, &missing]));
+        assert_eq!((entry.bytes, entry.files, entry.missing_files), (500, 3, 1));
+
+        let legacy = entry_on_disk(row(&a, vec![]));
+        assert_eq!((legacy.bytes, legacy.files, legacy.missing_files), (300, 1, 0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn legitimate_uuid_style_id_is_unchanged() {

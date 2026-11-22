@@ -183,6 +183,7 @@ async fn main() -> Result<()> {
             // a request per episode); both calls are cheap no-ops most iterations.
             app.poll_update_check();
             app.poll_stats();
+            app.poll_downloads_list();
             app.poll_podcast_home_refresh();
             app.refresh_podcast_home_if_stale(is_playing == "1");
 

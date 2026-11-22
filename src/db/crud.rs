@@ -4,6 +4,7 @@ use crate::db::database_struct::ListeningSession;
 use crate::db::database_struct::Others;
 use crate::db::database_struct::DownloadedItem;
 use crate::db::database_struct::DownloadedTrack;
+use crate::db::database_struct::DownloadRow;
 use crate::utils::pop_up_message::pop_message;
 use std::io::stdout;
 use log::{info, error};
@@ -347,6 +348,7 @@ pub fn insert_download(username: &str, id_item: &str, file_path: &str, duration:
             "INSERT OR REPLACE INTO downloads (username, id_item, file_path, duration, title, author, kind, tracks, chapters, is_auto) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![username, id_item, file_path, duration, title, author, kind, tracks_json, chapters_json, is_auto],
         )?;
+        mark_downloads_changed();
     } else {
         let mut stdout = stdout();
         let _ = pop_message(&mut stdout, 3, err_message);
@@ -366,34 +368,63 @@ pub fn get_download(username: &str, id_item: &str) -> Option<DownloadedItem> {
 
     let mut stmt = conn.prepare_cached("SELECT file_path, duration, title, author, tracks, chapters FROM downloads WHERE username = ?1 AND id_item = ?2").ok()?;
 
-    stmt.query_row(params![username, id_item], |row| {
-        let file_path: String = row.get(0)?;
-        let duration: String = row.get(1)?;
-        let tracks_json: String = row.get(4)?;
-        let chapters: String = row.get(5)?;
+    stmt.query_row(params![username, id_item], |row| downloaded_item(row, 0)).ok()
+}
 
-        // Rows written before `tracks` existed (or a podcast episode, which never
-        // gets one) have it empty - synthesize the single-file case from the legacy
-        // file_path/duration columns rather than requiring a re-download.
-        let tracks: Vec<DownloadedTrack> = if tracks_json.is_empty() {
-            vec![DownloadedTrack {
-                local_path: file_path.clone(),
-                duration: duration.parse::<f64>().unwrap_or(0.0),
-                start_offset: 0.0,
-            }]
-        } else {
-            serde_json::from_str(&tracks_json).unwrap_or_default()
-        };
+// Reads file_path, duration, title, author, tracks, chapters from `row`, starting at column `first`.
+fn downloaded_item(row: &rusqlite::Row, first: usize) -> rusqlite::Result<DownloadedItem> {
+    let file_path: String = row.get(first)?;
+    let duration: String = row.get(first + 1)?;
+    let tracks_json: String = row.get(first + 4)?;
 
-        Ok(DownloadedItem {
-            file_path,
-            duration,
-            title: row.get(2)?,
-            author: row.get(3)?,
-            tracks,
-            chapters,
-        })
-    }).ok()
+    // Rows written before `tracks` existed (or a podcast episode, which never
+    // gets one) have it empty - synthesize the single-file case from the legacy
+    // file_path/duration columns rather than requiring a re-download.
+    let tracks: Vec<DownloadedTrack> = if tracks_json.is_empty() {
+        vec![DownloadedTrack {
+            local_path: file_path.clone(),
+            duration: duration.parse::<f64>().unwrap_or(0.0),
+            start_offset: 0.0,
+        }]
+    } else {
+        serde_json::from_str(&tracks_json).unwrap_or_default()
+    };
+
+    Ok(DownloadedItem {
+        file_path,
+        duration,
+        title: row.get(first + 2)?,
+        author: row.get(first + 3)?,
+        tracks,
+        chapters: row.get(first + 5)?,
+    })
+}
+
+// Every download a user has, books first, each kind by title.
+pub fn list_downloads(username: &str) -> Result<Vec<DownloadRow>> {
+    downloads_of(&*open_db(default_db_path())?, username)
+}
+
+fn downloads_of(conn: &Connection, username: &str) -> Result<Vec<DownloadRow>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT id_item, kind, is_auto, file_path, duration, title, author, tracks, chapters FROM downloads
+         WHERE username = ?1 ORDER BY kind = 'podcast', title COLLATE NOCASE",
+    )?;
+    let rows = stmt.query_map(params![username], |row| {
+        Ok(DownloadRow { id_item: row.get(0)?, kind: row.get(1)?, is_auto: row.get(2)?, item: downloaded_item(row, 3)? })
+    })?;
+    rows.collect()
+}
+
+static DOWNLOADS_CHANGED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Bumped on every download added or removed, so an open Downloads screen knows to reload.
+pub fn downloads_version() -> u64 {
+    DOWNLOADS_CHANGED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn mark_downloads_changed() {
+    DOWNLOADS_CHANGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
 // remove a book's download row (the local file itself is removed by the caller -
@@ -409,6 +440,7 @@ pub fn delete_download(username: &str, id_item: &str) -> Result<()> {
             "DELETE FROM downloads WHERE username = ?1 AND id_item = ?2",
             params![username, id_item],
         )?;
+        mark_downloads_changed();
     } else {
         let mut stdout = stdout();
         let _ = pop_message(&mut stdout, 3, err_message);
@@ -1324,6 +1356,30 @@ mod tests {
         }
         assert_eq!(auto_downloaded_ids(&conn, "u", "book").unwrap(), vec!["auto-book"]);
         assert_eq!(auto_downloaded_ids(&conn, "u", "podcast").unwrap(), vec!["auto-ep"]);
+    }
+
+    #[test]
+    fn downloads_list_books_first_then_episodes_each_by_title() {
+        let conn = Connection::open(scratch_db("list-all")).unwrap();
+        conn.execute("CREATE TABLE users (username TEXT NOT NULL, is_auto_download TEXT NOT NULL DEFAULT '0')", []).unwrap();
+        create_downloads_table(&conn).unwrap();
+        for (user, id, title, kind, tracks, is_auto) in [
+            ("u", "ep", "a podcast episode", "podcast", "", true),
+            ("u", "b2", "Zebra", "book", r#"[{"local_path":"/x/b2_0.mp3","duration":1.0,"start_offset":0.0},{"local_path":"/x/b2_1.mp3","duration":1.0,"start_offset":1.0}]"#, false),
+            ("u", "b1", "apple", "book", "", false),
+            ("someone else", "b3", "Other", "book", "", false),
+        ] {
+            conn.execute(
+                "INSERT INTO downloads (username, id_item, file_path, duration, title, author, kind, tracks, is_auto) VALUES (?1, ?2, '/x/' || ?2, '1', ?3, '', ?4, ?5, ?6)",
+                params![user, id, title, kind, tracks, is_auto],
+            ).unwrap();
+        }
+        let rows = downloads_of(&conn, "u").unwrap();
+        let ids: Vec<&str> = rows.iter().map(|r| r.id_item.as_str()).collect();
+        assert_eq!(ids, vec!["b1", "b2", "ep"]);
+        assert_eq!(rows[1].item.tracks.len(), 2);
+        assert_eq!(rows[0].item.tracks[0].local_path, "/x/b1");
+        assert!(rows[2].is_auto && !rows[0].is_auto);
     }
 
     #[test]
