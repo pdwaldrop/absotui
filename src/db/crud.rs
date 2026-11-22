@@ -336,7 +336,7 @@ pub fn update_item_speed_rate(username: &str, id_item: &str, is_speed_rate_up: b
 // falls back to synthesizing a single track from `file_path`/`duration` when
 // `tracks_json` is empty, so already-downloaded single-file books need no re-download).
 #[allow(clippy::too_many_arguments)]
-pub fn insert_download(username: &str, id_item: &str, file_path: &str, duration: &str, title: &str, author: &str, kind: &str, tracks_json: &str, chapters_json: &str) -> Result<()> {
+pub fn insert_download(username: &str, id_item: &str, file_path: &str, duration: &str, title: &str, author: &str, kind: &str, tracks_json: &str, chapters_json: &str, is_auto: bool) -> Result<()> {
 
     let db_path = default_db_path();
 
@@ -344,8 +344,8 @@ pub fn insert_download(username: &str, id_item: &str, file_path: &str, duration:
 
     if let Ok(conn) = open_db(db_path) {
         conn.execute(
-            "INSERT OR REPLACE INTO downloads (username, id_item, file_path, duration, title, author, kind, tracks, chapters) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![username, id_item, file_path, duration, title, author, kind, tracks_json, chapters_json],
+            "INSERT OR REPLACE INTO downloads (username, id_item, file_path, duration, title, author, kind, tracks, chapters, is_auto) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![username, id_item, file_path, duration, title, author, kind, tracks_json, chapters_json, is_auto],
         )?;
     } else {
         let mut stdout = stdout();
@@ -418,24 +418,17 @@ pub fn delete_download(username: &str, id_item: &str) -> Result<()> {
     Ok(())
 }
 
-// get every id_item currently downloaded for a user of a given kind ("book" or
-// "podcast") - used to prune downloads that have fallen out of Continue Listening /
-// New & Unfinished when Settings > Auto Download is on. Scoped to `kind` so pruning
-// one media type's stale downloads never touches the other's.
-pub fn list_downloaded_ids(username: &str, kind: &str) -> Result<Vec<String>> {
+// Auto Download's own downloads of a kind ("book" or "podcast") for a user - the ones its
+// sync prunes once they fall out of Continue Listening / New & Unfinished. Downloads made
+// with `d` are never pruned by it.
+pub fn list_auto_downloaded_ids(username: &str, kind: &str) -> Result<Vec<String>> {
+    auto_downloaded_ids(&*open_db(default_db_path())?, username, kind)
+}
 
-    let db_path = default_db_path();
-
-    let conn = open_db(db_path)?;
-
-    let mut stmt = conn.prepare_cached("SELECT id_item FROM downloads WHERE username = ?1 AND kind = ?2")?;
+fn auto_downloaded_ids(conn: &Connection, username: &str, kind: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare_cached("SELECT id_item FROM downloads WHERE username = ?1 AND kind = ?2 AND is_auto = 1")?;
     let rows = stmt.query_map(params![username, kind], |row| row.get::<_, String>(0))?;
-
-    let mut ids = Vec::new();
-    for row in rows {
-        ids.push(row?);
-    }
-    Ok(ids)
+    rows.collect()
 }
 
 pub fn get_listening_session() -> Result<Option<ListeningSession>> {
@@ -1198,6 +1191,29 @@ pub fn init_db() -> Result<()> {
         [],
     );
 
+    create_downloads_table(&conn)?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS others (
+            login_err TEXT NOT NULL DEFAULT '',
+            auth_in_progress TEXT NOT NULL DEFAULT '0'
+        )",
+        [],
+    )?;
+
+    // Migration for databases created before `auth_in_progress` existed.
+    // SQLite has no "ADD COLUMN IF NOT EXISTS", so we just ignore the error
+    // when the column is already there.
+    let _ = conn.execute(
+        "ALTER TABLE others ADD COLUMN auth_in_progress TEXT NOT NULL DEFAULT '0'",
+        [],
+    );
+
+    Ok(())
+}
+
+// `is_auto` marks downloads made by Settings > Auto Download, the only ones its sync may prune.
+fn create_downloads_table(conn: &Connection) -> Result<()> {
     // Create table `downloads` if there is none - one row per (user, book or podcast
     // episode) that's been downloaded for offline playback. `file_path` is the local
     // audio file on disk; `duration`/`title`/`author` are snapshotted at download time
@@ -1217,6 +1233,7 @@ pub fn init_db() -> Result<()> {
             kind TEXT NOT NULL DEFAULT 'book',
             tracks TEXT NOT NULL DEFAULT '',
             chapters TEXT NOT NULL DEFAULT '',
+            is_auto INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (username, id_item)
             )",
         [],
@@ -1241,21 +1258,13 @@ pub fn init_db() -> Result<()> {
         [],
     );
 
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS others (
-            login_err TEXT NOT NULL DEFAULT '',
-            auth_in_progress TEXT NOT NULL DEFAULT '0'
-        )",
-        [],
-    )?;
-
-    // Migration for databases created before `auth_in_progress` existed.
-    // SQLite has no "ADD COLUMN IF NOT EXISTS", so we just ignore the error
-    // when the column is already there.
-    let _ = conn.execute(
-        "ALTER TABLE others ADD COLUMN auth_in_progress TEXT NOT NULL DEFAULT '0'",
-        [],
-    );
+    // Rows from before `is_auto` existed: a user with Auto Download on got theirs from it.
+    if conn.execute("ALTER TABLE downloads ADD COLUMN is_auto INTEGER NOT NULL DEFAULT 0", []).is_ok() {
+        conn.execute(
+            "UPDATE downloads SET is_auto = 1 WHERE username IN (SELECT username FROM users WHERE is_auto_download = '1')",
+            [],
+        )?;
+    }
 
     Ok(())
 }
@@ -1269,6 +1278,52 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("db.sqlite3")
+    }
+
+    fn db_with_old_downloads_table(name: &str) -> Connection {
+        let conn = Connection::open(scratch_db(name)).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE users (username TEXT NOT NULL, is_auto_download TEXT NOT NULL DEFAULT '0');
+             INSERT INTO users VALUES ('auto_on', '1'), ('auto_off', '0');
+             CREATE TABLE downloads (username TEXT NOT NULL, id_item TEXT NOT NULL, file_path TEXT NOT NULL,
+                 duration TEXT NOT NULL, title TEXT NOT NULL, author TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'book',
+                 tracks TEXT NOT NULL DEFAULT '', chapters TEXT NOT NULL DEFAULT '', PRIMARY KEY (username, id_item));
+             INSERT INTO downloads (username, id_item, file_path, duration, title, author) VALUES
+                 ('auto_on', 'b1', '', '', '', ''), ('auto_off', 'b2', '', '', '', '');",
+        ).unwrap();
+        conn
+    }
+
+    #[test]
+    fn existing_downloads_count_as_auto_only_for_users_with_auto_download_on() {
+        let conn = db_with_old_downloads_table("migrate");
+        create_downloads_table(&conn).unwrap();
+        assert_eq!(auto_downloaded_ids(&conn, "auto_on", "book").unwrap(), vec!["b1"]);
+        assert!(auto_downloaded_ids(&conn, "auto_off", "book").unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_migration_runs_once() {
+        let conn = db_with_old_downloads_table("migrate-once");
+        create_downloads_table(&conn).unwrap();
+        conn.execute("UPDATE users SET is_auto_download = '1' WHERE username = 'auto_off'", []).unwrap();
+        create_downloads_table(&conn).unwrap();
+        assert!(auto_downloaded_ids(&conn, "auto_off", "book").unwrap().is_empty());
+    }
+
+    #[test]
+    fn only_auto_downloads_of_the_asked_kind_are_listed() {
+        let conn = Connection::open(scratch_db("listing")).unwrap();
+        conn.execute("CREATE TABLE users (username TEXT NOT NULL, is_auto_download TEXT NOT NULL DEFAULT '0')", []).unwrap();
+        create_downloads_table(&conn).unwrap();
+        for (id, kind, is_auto) in [("auto-book", "book", true), ("manual-book", "book", false), ("auto-ep", "podcast", true)] {
+            conn.execute(
+                "INSERT INTO downloads (username, id_item, file_path, duration, title, author, kind, is_auto) VALUES ('u', ?1, '', '', '', '', ?2, ?3)",
+                params![id, kind, is_auto],
+            ).unwrap();
+        }
+        assert_eq!(auto_downloaded_ids(&conn, "u", "book").unwrap(), vec!["auto-book"]);
+        assert_eq!(auto_downloaded_ids(&conn, "u", "podcast").unwrap(), vec!["auto-ep"]);
     }
 
     #[test]

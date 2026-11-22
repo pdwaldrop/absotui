@@ -1753,3 +1753,31 @@ old behavior).
 
 **Open questions / handoff:** Not committed - waiting on Paul's go-ahead; a release would need a changelog entry. The two
 copies still share one player port/socket, so pressing play in either copy takes over playback (as before, by design).
+
+### 2026-11-21 — Claude Code (rollback fix pushed; Auto Download no longer prunes manual downloads, uncommitted)
+
+**What changed:** The progress-rollback / second-instance fix from the entry above went to `main` as b003306 with Paul's
+go-ahead; CI passed on ubuntu and macOS (so the new lock tests pass on macOS too). Then review finding 3: with Auto
+Download on, its sync deleted every download outside its window, including ones made by hand with `d` (Home only).
+Downloads now record who made them: a new `is_auto` column in `downloads` (`src/db/crud.rs`, setup moved into
+`create_downloads_table`), set by `download_book`/`download_episode`'s new `is_auto` argument - true from the Auto
+Download sync, false from `d`. The sync prunes only `is_auto` rows (`list_auto_downloaded_ids`). Existing rows are
+migrated once: they count as automatic for a user who has Auto Download on (so pruning keeps working for them as before)
+and manual for everyone else. Correction to the review finding's example: `d` only works on Home, not Library, so the
+real triggers are a `d` on a Continue Listening book beyond the Auto Download count, or a downloaded podcast episode that
+drops out of New & Unfinished (e.g. pushed out of the server's "Newest Episodes" shelf) before it was played.
+
+**How it was verified:** `cargo build`/`test` (159 passed: 156 plus 3 new - the one-time migration by user setting, that
+it runs only once, and that only automatic downloads of the asked kind are listed) and the CI clippy command are clean.
+Live against a throwaway fake server with its own config and runtime folders, Auto Download on with a count of 1 and
+two books in Continue Listening: the new build auto-downloaded the first book, a `d` on the second book downloaded it,
+and the next refresh kept both; after the first book left Continue Listening, a refresh removed it (row and file) and
+kept the manual one. The installed v0.11.9 with the same steps deleted the manual download at the next refresh. The new
+build opening v0.11.9's database added the column and marked its existing download as automatic (user had it on).
+
+**Not verified:** podcasts live (same code path as books, covered by the listing test); macOS (CI runs the tests on push).
+
+**Open questions / handoff:** Not committed - waiting on Paul's go-ahead. A gap this makes more visible: `d` only works on
+Home, so a manual download whose book or episode leaves Home can no longer be removed from inside the app (true before
+this change too whenever Auto Download was off). A small Downloads list in Settings would close it. Remaining review
+findings 4-10 are untouched.

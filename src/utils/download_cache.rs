@@ -11,7 +11,7 @@ use reqwest::{Client, Response, StatusCode};
 use tokio::io::AsyncWriteExt;
 use crate::api::library_items::play_lib_item_or_pod::{post_start_playback_session_book, post_start_playback_session_pod, AudioTrack};
 use crate::api::sessions::close_open_session::close_session_without_send_prg_data;
-use crate::db::crud::{insert_download, delete_download, get_download, list_downloaded_ids};
+use crate::db::crud::{insert_download, delete_download, get_download, list_auto_downloaded_ids};
 use crate::db::database_struct::DownloadedTrack;
 use crate::utils::http_client::download_client;
 
@@ -212,7 +212,7 @@ fn remove_stale_partials() {
 /// so this opens one purely to read `audioTracks`/`duration`/`chapters` off the
 /// response and immediately closes it again - the server never sees a real listen out
 /// of this.
-pub async fn download_book(token: String, item_id: String, title: String, author: String, username: String, server_address: String) -> Result<()> {
+pub async fn download_book(token: String, item_id: String, title: String, author: String, username: String, server_address: String, is_auto: bool) -> Result<()> {
     if is_downloaded(&username, &item_id) {
         return Ok(());
     }
@@ -255,7 +255,7 @@ pub async fn download_book(token: String, item_id: String, title: String, author
     let file_path = downloaded_tracks.first().map(|t| t.local_path.clone()).unwrap_or_default();
     let tracks_json = serde_json::to_string(&downloaded_tracks).unwrap_or_default();
 
-    insert_download(&username, &item_id, &file_path, duration, &title, &author, "book", &tracks_json, chapters_json)?;
+    insert_download(&username, &item_id, &file_path, duration, &title, &author, "book", &tracks_json, chapters_json, is_auto)?;
     info!("[download_book] downloaded {item_id} ({} file(s), {total_bytes} bytes)", downloaded_tracks.len());
 
     Ok(())
@@ -266,7 +266,7 @@ pub async fn download_book(token: String, item_id: String, title: String, author
 /// endpoint needs both the parent podcast's id and the episode's own id (see
 /// `post_start_playback_session_pod`), and it's the episode id that's used as the
 /// dedupe/storage key (`item_id` below) - it's the one that's actually unique per row.
-pub async fn download_episode(token: String, podcast_id: String, episode_id: String, title: String, podcast_title: String, username: String, server_address: String) -> Result<()> {
+pub async fn download_episode(token: String, podcast_id: String, episode_id: String, title: String, podcast_title: String, username: String, server_address: String, is_auto: bool) -> Result<()> {
     if is_downloaded(&username, &episode_id) {
         return Ok(());
     }
@@ -287,7 +287,7 @@ pub async fn download_episode(token: String, podcast_id: String, episode_id: Str
     let client = download_client();
     let (path, bytes) = fetch_audio(&client, &format!("{server_address}{content_url}"), &token, &episode_id).await?;
 
-    insert_download(&username, &episode_id, &path.to_string_lossy(), duration, &title, &podcast_title, "podcast", "", "")?;
+    insert_download(&username, &episode_id, &path.to_string_lossy(), duration, &title, &podcast_title, "podcast", "", "", is_auto)?;
     info!("[download_episode] downloaded {episode_id} ({bytes} bytes) to {path:?}");
 
     Ok(())
@@ -334,7 +334,7 @@ async fn sync_books(request: BookSync) {
     remove_stale_partials();
     let ids: Vec<String> = ids.into_iter().take(count).collect();
 
-    if let Ok(existing) = list_downloaded_ids(&username, "book") {
+    if let Ok(existing) = list_auto_downloaded_ids(&username, "book") {
         for stale_id in existing.into_iter().filter(|id| !ids.contains(id)) {
             if let Err(e) = remove_download(&username, &stale_id) {
                 error!("[sync_auto_downloads] failed to prune {stale_id}: {e}");
@@ -348,7 +348,7 @@ async fn sync_books(request: BookSync) {
         }
         let title = titles.get(i).cloned().unwrap_or_default();
         let author = authors.get(i).cloned().unwrap_or_default();
-        run_auto("sync_auto_downloads", &username, id, download_book(token.clone(), id.clone(), title, author, username.clone(), server_address.clone())).await;
+        run_auto("sync_auto_downloads", &username, id, download_book(token.clone(), id.clone(), title, author, username.clone(), server_address.clone(), true)).await;
     }
 }
 
@@ -368,7 +368,7 @@ async fn sync_podcasts(request: PodcastSync) {
     let PodcastSync { username, token, server_address, podcast_ids, episode_ids, titles, podcast_titles } = request;
     remove_stale_partials();
 
-    if let Ok(existing) = list_downloaded_ids(&username, "podcast") {
+    if let Ok(existing) = list_auto_downloaded_ids(&username, "podcast") {
         for stale_id in existing.into_iter().filter(|id| !episode_ids.contains(id)) {
             if let Err(e) = remove_download(&username, &stale_id) {
                 error!("[sync_auto_downloads_podcasts] failed to prune {stale_id}: {e}");
@@ -383,7 +383,7 @@ async fn sync_podcasts(request: PodcastSync) {
         let Some(podcast_id) = podcast_ids.get(i).cloned() else { continue };
         let title = titles.get(i).cloned().unwrap_or_default();
         let podcast_title = podcast_titles.get(i).cloned().unwrap_or_default();
-        run_auto("sync_auto_downloads_podcasts", &username, episode_id, download_episode(token.clone(), podcast_id, episode_id.clone(), title, podcast_title, username.clone(), server_address.clone())).await;
+        run_auto("sync_auto_downloads_podcasts", &username, episode_id, download_episode(token.clone(), podcast_id, episode_id.clone(), title, podcast_title, username.clone(), server_address.clone(), true)).await;
     }
 }
 

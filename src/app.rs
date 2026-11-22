@@ -2058,7 +2058,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                         tokio::spawn(async move {
                             let mut stdout = stdout();
                             let _ = pop_message(&mut stdout, 3, "Downloading for offline playback...");
-                            if let Err(e) = download_book(token, id.clone(), title, author, username, server_address).await {
+                            if let Err(e) = download_book(token, id.clone(), title, author, username, server_address, false).await {
                                 error!("[handle_key][download_book] {id}: {e}");
                             }
                             let _ = clear_message(&mut stdout, 3);
@@ -2081,7 +2081,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                             tokio::spawn(async move {
                                 let mut stdout = stdout();
                                 let _ = pop_message(&mut stdout, 3, "Downloading for offline playback...");
-                                if let Err(e) = download_episode(token, podcast_id, episode_id.clone(), title, podcast_title, username, server_address).await {
+                                if let Err(e) = download_episode(token, podcast_id, episode_id.clone(), title, podcast_title, username, server_address, false).await {
                                     error!("[handle_key][download_episode] {episode_id}: {e}");
                                 }
                                 let _ = clear_message(&mut stdout, 3);
