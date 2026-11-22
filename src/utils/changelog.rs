@@ -1521,8 +1521,7 @@ let changelog_87 = "Changelog Absotui v0.11.8 (11/11/2026) \n\
          \n\
          Enjoy!\n
          ####\n".to_string();
-let changelog_88 = format!(
-    "Changelog Absotui v{VERSION} (12/11/2026) \n\
+let changelog_88 = "Changelog Absotui v0.11.9 (12/11/2026) \n\
          \n\
          Changed:\n\
          - The Now Playing box no longer has a blank row above the title.\n\
@@ -1534,10 +1533,38 @@ let changelog_88 = format!(
            moves back inside the box.\n\
          \n\
          Enjoy!\n
+         ####\n".to_string();
+
+let changelog_89 = format!(
+    "Changelog Absotui v{VERSION} (21/11/2026) \n\
+         \n\
+         New:\n\
+         - Settings > Downloads lists everything you've downloaded for\n\
+           offline listening, from every library, with its size on disk.\n\
+           Press d to delete one. Until now a download could only be\n\
+           removed from Home, so one whose book or episode had left Home\n\
+           stayed on disk for good.\n\
+         \n\
+         Fixed:\n\
+         - Starting Absotui, or quitting it with nothing playing, could put\n\
+           a book or episode back to where you last stopped it in Absotui,\n\
+           undoing listening done since on another device. It now only\n\
+           syncs a session the previous run left playing (after a crash or\n\
+           a closed terminal).\n\
+         - Opening a second Absotui stopped playback in the first one and\n\
+           closed its session. Copies running at the same time now leave\n\
+           each other's playback alone.\n\
+         - With Auto Download on, its clean-up also deleted books and\n\
+           episodes you had downloaded yourself with d. It now only removes\n\
+           its own downloads. Existing downloads count as automatic if Auto\n\
+           Download is on, so they're handled as before.\n\
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_89);
     changelog.push_str(&changelog_88);
     changelog.push_str(&changelog_87);
     changelog.push_str(&changelog_86);
