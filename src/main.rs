@@ -21,7 +21,7 @@ use crate::utils::pop_up_message::{clear_message, pop_message, NEEDS_TERMINAL_CL
 use std::sync::atomic::Ordering;
 use crate::utils::logs::setup_logs;
 use log::info;
-use crate::db::crud::{update_is_vlc_launched_first_time, get_is_vlc_launched_first_time, get_is_vlc_running, update_is_vlc_running, get_auth_in_progress};
+use crate::db::crud::{update_is_vlc_launched_first_time, get_is_vlc_running, update_is_vlc_running, get_auth_in_progress};
 use crate::player::integrated::player_info::{player_info, playing_item_name};
 use crate::ui::player_tui::render_player;
 use std::env;
@@ -29,7 +29,7 @@ use std::path::PathBuf;
 use crate::utils::clap::clap;
 use crate::utils::scroll_wheel::{disable_terminal_scroll_wheel, restore_terminal_scroll_wheel};
 use crate::logic::server_recovery::init_app_with_retry;
-use crate::logic::sync_session::sync_session_from_database::sync_session_from_database;
+use crate::logic::sync_session::sync_session_from_database::recover_session_left_playing;
 use crate::app::UpdateUninstallStage;
 use crate::logic::update_uninstall::{Action, ProgressEvent};
 use std::os::unix::process::CommandExt;
@@ -93,18 +93,17 @@ async fn main() -> Result<()> {
         if let Some(var_username) = _database.default_usr.first() {
             username = var_username.clone();
         }
-        let _ = update_is_vlc_launched_first_time("1", username.as_str());
-        let value = get_is_vlc_launched_first_time(username.as_str());
-        info!("[main][is_vlc_launched_first_time] {value}");
-
-        // A fresh process can never have inherited a live playback task from a
-        // previous run (those only exist as tokio tasks within the process that
-        // spawned them - see handle_l_book.rs et al) - so if this is still "1" here,
-        // it's leftover from a previous crash/kill that never got to reset it, and
-        // would otherwise make the render loop show a frozen player overlay for a
-        // session nothing is actually backing (confirmed live: it doesn't advance,
-        // and there's no real VLC process behind it).
-        let _ = update_is_vlc_running("0", username.as_str());
+        // The playback flags are shared through the database, so they're only reset when
+        // no other Absotui is running. Still "playing" then means the last run exited
+        // mid-playback; its session gets synced once the server is reachable.
+        let other_instance_running = utils::instance_lock::register();
+        let previous_run_exited_mid_playback = !other_instance_running && get_is_vlc_running(username.as_str()) == "1";
+        if other_instance_running {
+            info!("[main] Another Absotui is running - leaving the shared playback state alone");
+        } else {
+            let _ = update_is_vlc_launched_first_time("1", username.as_str());
+            let _ = update_is_vlc_running("0", username.as_str());
+        }
 
         let mut terminal = ratatui::init();
         disable_terminal_scroll_wheel();
@@ -114,31 +113,14 @@ async fn main() -> Result<()> {
             unreachable!("allow_cancel=false never returns Cancel");
         };
 
-        // If the app was killed or crashed mid-playback, the session it left open is
-        // still open server-side (visible under /audiobookshelf/config/sessions) and
-        // its last position never got synced - every normal exit path closes its own
-        // session, so anything still sitting in `listening_session` here is debris from
-        // an abnormal one. Closing it now rather than deferring to whenever the user
-        // next presses play means the position isn't left dangling for an arbitrarily
-        // long time (see known_bugs.md `bug_id: 6ac5d8`).
-        //
-        // Deliberately after `init_app_with_retry` rather than before: that's the point
-        // the server is known reachable, so this doesn't burn its one attempt against a
-        // server that's down. A no-op when there's no leftover row, and it leaves the
-        // row itself in place - offline resume reads it back for the local position.
-        let leftover_token = app.token.clone();
-        let leftover_server = app.server_address.clone();
-        let leftover_username = app.username.clone();
-        let leftover_player = app.player.clone();
-        tokio::spawn(async move {
-            sync_session_from_database(
-                leftover_token,
-                leftover_server,
-                leftover_username,
-                "startup",
-                &leftover_player,
-            ).await;
-        });
+        if previous_run_exited_mid_playback {
+            let token = app.token.clone();
+            let server_address = app.server_address.clone();
+            let player = app.player.clone();
+            tokio::spawn(async move {
+                recover_session_left_playing(token, server_address, &player).await;
+            });
+        }
 
         // Absotui has no window of its own - the terminal's title is whatever the
         // running program sets it to (or just "absotui", the binary name, if nothing

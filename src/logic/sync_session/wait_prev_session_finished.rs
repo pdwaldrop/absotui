@@ -2,11 +2,34 @@ use crate::db::crud::{get_is_vlc_launched_first_time, get_is_loop_break, update_
 use log::info;
 use crate::utils::pop_up_message::{pop_message, clear_message, NEEDS_TERMINAL_CLEAR};
 use std::io::stdout;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static PLAYBACK_TASKS: AtomicUsize = AtomicUsize::new(0);
+
+/// Held by a playback task for as long as it runs, so quitting can tell this process's
+/// own playback from another Absotui's.
+pub struct PlaybackTask(());
+
+impl PlaybackTask {
+    fn start() -> Self {
+        PLAYBACK_TASKS.fetch_add(1, Ordering::SeqCst);
+        Self(())
+    }
+}
+
+impl Drop for PlaybackTask {
+    fn drop(&mut self) {
+        PLAYBACK_TASKS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+pub fn owns_playback() -> bool {
+    PLAYBACK_TASKS.load(Ordering::SeqCst) > 0
+}
 
 // Blocks until the previously-running playback task (if any) has finished its own
 // close/sync and released the playback slot, so a new track can't start while the old
-// one is still tearing down. Returns whether the slot was actually claimed - `false`
+// one is still tearing down. Returns the claimed slot, to hold while playing - `None`
 // means the caller must NOT proceed to start a track (see below).
 //
 // Callers deliberately do NOT follow this with a defensive close of whatever's left in
@@ -17,7 +40,7 @@ use std::sync::atomic::Ordering;
 // on every track switch (confirmed live 2026-07-28: once from the previous track's own
 // quit-detection loop, once from the caller) - the concrete root cause behind bug_id
 // dd9a649.
-pub fn wait_prev_session_finished(username: String) -> bool {
+pub fn wait_prev_session_finished(username: String) -> Option<PlaybackTask> {
 
     let message = "Syncing your last listening session. Please wait...";
     let mut stdout = stdout();
@@ -62,7 +85,7 @@ pub fn wait_prev_session_finished(username: String) -> bool {
                 info!("[AppView::Home][wait_prev_session_finished] Gave up waiting for the playback slot - it's already owned by another in-flight playback-start attempt");
                 let _ = clear_message(&mut stdout, 3);
                 NEEDS_TERMINAL_CLEAR.store(true, Ordering::Relaxed);
-                return false;
+                return None;
             }
         } else {
             // First launch ever for this account: is_loop_break starts at "0" (see
@@ -86,5 +109,22 @@ pub fn wait_prev_session_finished(username: String) -> bool {
         // same stale-cache fate regardless of which branch ran here.
         NEEDS_TERMINAL_CLEAR.store(true, Ordering::Relaxed);
 
-        true
+        Some(PlaybackTask::start())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn playback_is_owned_while_a_task_holds_it() {
+        assert!(!owns_playback());
+        let first = PlaybackTask::start();
+        let second = PlaybackTask::start();
+        assert!(owns_playback());
+        drop(first);
+        assert!(owns_playback());
+        drop(second);
+        assert!(!owns_playback());
+    }
 }

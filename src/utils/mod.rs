@@ -14,3 +14,4 @@ pub mod scroll_wheel;
 pub mod format_size;
 pub mod http_client;
 pub mod wake;
+pub mod instance_lock;

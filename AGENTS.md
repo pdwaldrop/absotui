@@ -1715,3 +1715,41 @@ files removed.
 publishing (AUR registration still closed as of Paul's 2026-11-08 check).
 
 **Open questions / handoff:** none new. #11 is still waiting on the reporter's result with v0.11.8's sign-in address.
+
+### 2026-11-21 — Claude Code (code review; progress rollback and second-instance fixes, uncommitted)
+
+**What changed:** Paul asked for a review of `src` for bugs and optimization. It found 10 issues, ranked; he asked to fix
+the top two, which share one cause: the startup "leftover session" sync assumed the saved `listening_session` row only
+exists after a crash, but a normal stop leaves it behind (already synced).
+1. *Progress rollback:* every launch, and every quit with nothing playing, re-sent that row's old position
+   (`PATCH /api/me/progress`), undoing listening done since on another device. Now the startup recovery
+   (`recover_session_left_playing`, `src/logic/sync_session/sync_session_from_database.rs`) only runs when the
+   previous run really exited mid-playback (`is_vlc_running` still "1" and no other Absotui running), and an idle
+   quit never syncs anything.
+2. *A second Absotui stopped the first one's playback:* its startup (and an idle quit) stopped the shared player,
+   closed the first instance's session, and reset the shared database flags. New `src/utils/instance_lock.rs`:
+   every running Absotui holds a shared OS file lock on `instance.lock` in the config folder (released by the OS
+   even on a crash), so startup and quit can tell whether another copy is alive and then leave its player, session
+   and flags alone. `wait_prev_session_finished` now returns a `PlaybackTask` guard held for the length of each
+   playback task, so Q knows whether this process owns the playback (instead of trusting the shared flag).
+The other 8 findings (Auto Download pruning manual downloads, mpv paused in the first second, VLC seek while paused,
+player left running after the last track, three per-frame/blocking costs, long comments) are not fixed yet.
+
+**How it was verified:** `cargo build`/`test` (156 passed: 151 plus 5 new - the lock probe, a registered instance seen
+until it lets go, the probe leaving no lock, and the playback-task count) and the CI clippy command are clean. Live,
+against a throwaway fake Audiobookshelf with its own config folder and its own mpv socket directory (Paul was playing
+an episode at the time; his player was confirmed untouched afterwards), new build vs the installed v0.11.9:
+- Play, stop (X), quit; set the server's position to 3000 s as if from another device; relaunch, quit while idle:
+  new build sent no progress or close (still 3000 s); v0.11.9 pushed the stale 124 s back on launch and again on quit.
+- Crash: `kill -9` mid-playback, relaunch: the orphaned mpv was stopped, the session closed and the last real position
+  (513 s) synced, flag reset - recovery still works.
+- Two copies: second new-build copy started and quit while the first played: the first's mpv stayed up and kept
+  syncing; v0.11.9 as the second copy stopped the first's player and closed its session at once.
+- Q while playing: one close + one progress push, mpv gone, app exited.
+
+**Not verified:** macOS (the lock is std's `flock`; CI runs the unit tests there on push); VLC (tests used mpv); Paul's
+real server and setup; two copies started at the very same instant (each could think it's alone - harmless beyond the
+old behavior).
+
+**Open questions / handoff:** Not committed - waiting on Paul's go-ahead; a release would need a changelog entry. The two
+copies still share one player port/socket, so pressing play in either copy takes over playback (as before, by design).

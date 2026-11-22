@@ -2185,16 +2185,11 @@ pub fn handle_key(&mut self, key: KeyEvent) {
             let mut stdout = stdout();
             let _ = pop_message(&mut stdout, 3, message_quit);
 
-            // close and sync session before close the app - if a playback task is
-            // still actively watching a session, quit_app defers the actual close/sync
-            // to it instead of racing it (see quit_app's doc comment)
-            let token = self.token.clone();
-            let server_address = self.server_address.clone();
             let username = self.username.clone();
             let player = self.player.clone();
 
             tokio::spawn(async move {
-                quit_app(token, server_address, username, player).await;
+                quit_app(username, player).await;
             });
 
         }
@@ -2353,8 +2348,8 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                             let _ = player.quit();
 
                             // wait to close/sync the previous session first - see
-                            // wait_prev_session_finished for what a false return means
-                            if wait_prev_session_finished(username.clone()) {
+                            // wait_prev_session_finished for what a None return means
+                            if let Some(_playback) = wait_prev_session_finished(username.clone()) {
 
                             let mut stdout = stdout();
                             let _ = pop_message(&mut stdout, 3, message);
@@ -2381,8 +2376,8 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                             let _ = player.quit();
 
                             // wait to close/sync the previous session first - see
-                            // wait_prev_session_finished for what a false return means
-                            if wait_prev_session_finished(username.clone()) {
+                            // wait_prev_session_finished for what a None return means
+                            if let Some(_playback) = wait_prev_session_finished(username.clone()) {
 
                             let mut stdout = stdout();
                             let _ = pop_message(&mut stdout, 3, message);
@@ -2510,8 +2505,8 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                                 let _ = player.quit();
 
                                 // wait to close/sync the previous session first - see
-                                // wait_prev_session_finished for what a false return means
-                                if wait_prev_session_finished(username.clone()) {
+                                // wait_prev_session_finished for what a None return means
+                                if let Some(_playback) = wait_prev_session_finished(username.clone()) {
 
                                 let mut stdout = stdout();
                                 let _ = pop_message(&mut stdout, 3, message);
@@ -2565,8 +2560,8 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                                 let _ = player.quit();
 
                                 // wait to close/sync the previous session first - see
-                                // wait_prev_session_finished for what a false return means
-                                if wait_prev_session_finished(username.clone()) {
+                                // wait_prev_session_finished for what a None return means
+                                if let Some(_playback) = wait_prev_session_finished(username.clone()) {
 
                                 let mut stdout = stdout();
                                 let _ = pop_message(&mut stdout, 3, message);
@@ -2597,8 +2592,8 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                                     let _ = player.quit();
 
                                     // wait to close/sync the previous session first - see
-                                    // wait_prev_session_finished for what a false return means
-                                    if wait_prev_session_finished(username.clone()) {
+                                    // wait_prev_session_finished for what a None return means
+                                    if let Some(_playback) = wait_prev_session_finished(username.clone()) {
 
                                     let mut stdout = stdout();
                                     let _ = pop_message(&mut stdout, 3, message);
@@ -2627,8 +2622,8 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                                     let _ = player.quit();
 
                                     // wait to close/sync the previous session first - see
-                                    // wait_prev_session_finished for what a false return means
-                                    if wait_prev_session_finished(username.clone()) {
+                                    // wait_prev_session_finished for what a None return means
+                                    if let Some(_playback) = wait_prev_session_finished(username.clone()) {
 
                                     let mut stdout = stdout();
                                     let _ = pop_message(&mut stdout, 3, message);
