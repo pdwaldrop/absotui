@@ -1809,3 +1809,30 @@ a library with hundreds of downloads (sizes are one `stat` per file when the scr
 
 **Open questions / handoff:** Not committed - waiting on Paul's go-ahead; it's a user-visible feature for the next release's
 changelog. Remaining review findings 4-10 are untouched.
+
+### 2026-11-21 — Claude Code (v0.12.0 release; AUR draft bumped)
+
+**What changed:** With Paul's go-ahead the Settings > Downloads screen went to `main` as 8c52dec, then v0.12.0 was cut
+(minor - a new user-facing screen, same call as v0.9.0/v0.10.0/v0.11.0). It carries everything since v0.11.9: the startup
+and idle-quit progress rollback fix and the second-instance fix (b003306), Auto Download keeping downloads made with `d`
+(cccd194), and Settings > Downloads (8c52dec). The v0.11.9 changelog entry was frozen and a v0.12.0 one added (3788177);
+the workflow's bump commit is 21e548e. The AUR draft (`packaging/aur-bin/`) is at 0.12.0: only the two tarball checksums
+changed.
+
+**How it was verified:** `cargo test` (161 passed) and the CI clippy command clean; CI on 3788177 passed on ubuntu and
+macOS before the cut. Cut Release and Release succeeded on the first attempt (all three builds and the checksum job); all
+12 assets are on the release, downloaded fresh, and every file matches `SHA256SUMS.txt`. The x86_64 binary and AppImage
+(run with `APPIMAGE_EXTRACT_AND_RUN`) report 0.12.0; all three binaries contain the new changelog entry, the frozen
+v0.11.9 one, the Downloads screen and the instance lock. Highest glibc requirement unchanged: 2.34 (x86_64), 2.18
+(aarch64); the macOS tarball is a universal binary. `main`, `stable` and the tag sit on the bump commit and the four
+files the installer fetches from `stable` are byte-identical to the release assets. AUR: the five sources match
+`SHA256SUMS.txt`, `makepkg -f --nodeps` in a scratch copy passed all four host checksums and the packaged binary reports
+0.12.0 with no missing libraries.
+
+**Not verified:** a real `absotui --update` or fresh install from this release; the aarch64 and macOS binaries were
+inspected, not run; the AppImage was not run through FUSE; the new code on Paul's real server and setup (all live tests
+were against fake servers).
+
+**Open questions / handoff:** Paul's installed copy is v0.11.9 until he runs `absotui --update`; the first launch of
+0.12.0 on his machine will not re-send old progress, and his existing downloads count as automatic only if Auto Download
+is on. Remaining review findings 4-10 are untouched.
