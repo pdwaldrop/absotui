@@ -1,5 +1,5 @@
 use crate::App;
-use crate::app::{AppView, HomeRow, LibraryRow, UpdateUninstallStage, PodcastAddStage, SETTINGS_ABOUT, SETTINGS_UPDATE_UNINSTALL};
+use crate::app::{AppView, HomeRow, UpdateUninstallStage, PodcastAddStage, SETTINGS_ABOUT, SETTINGS_UPDATE_UNINSTALL};
 use crate::logic::update_uninstall::Action;
 use crate::api::libraries::get_library_perso_view_pod::Chapter;
 use ratatui::{
@@ -383,22 +383,8 @@ impl App {
 
         let [list_area, item_area1, item_area2] = Layout::vertical([Constraint::Fill(1), Constraint::Length(5), Constraint::Fill(1)]).areas(main_area);
 
-        let rows = self.build_library_rows();
-        let display_titles: Vec<String> = rows.iter().map(|row| match row {
-            LibraryRow::SeriesHeader(name) => format!("▸ {name}"),
-            LibraryRow::Book(i) => {
-                let title = &self.titles_library[*i];
-                if self.is_library_grouped_by_series {
-                    match self.series_sequence_library.get(*i).copied().flatten() {
-                        Some(seq) => format!("  #{seq} {title}"),
-                        None => format!("  {title}"),
-                    }
-                } else {
-                    title.clone()
-                }
-            }
-        }).collect();
-        let items_number = rows.iter().filter(|row| matches!(row, LibraryRow::Book(_))).count();
+        let cache = self.take_library_rows_cache();
+        let items_number = cache.book_count;
         let render_list_title = match self.active_collection {
             Some(index) => format!("{} [{items_number} items]", self.collection_names[index]),
             None => format!("Library [{items_number} items]"),
@@ -406,18 +392,19 @@ impl App {
 
         App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
         App::render_footer(footer_area, buf, &_text_render_footer);
-        self.render_list(list_area, buf, &render_list_title, &display_titles, &mut self.list_state_library.clone(), None);
+        self.render_list(list_area, buf, &render_list_title, &cache.titles, &mut self.list_state_library.clone(), None);
         // Resolved to the real book index behind the current row selection (a series
         // header has nothing to show here) - see `selected_library_book_index`'s doc
         // comment for why this can't just be `list_state_library` itself. Resolved
         // against `rows` (already built above for display) rather than calling
         // `selected_library_book_index()`, which would redo the same grouping/sort pass.
-        if let Some(book_index) = App::resolve_library_book_index(self.list_state_library.selected(), &rows) {
+        if let Some(book_index) = App::resolve_library_book_index(self.list_state_library.selected(), &cache.rows) {
             let mut resolved_state = ListState::default();
             resolved_state.select(Some(book_index));
             self.render_info_library(item_area1, buf, &resolved_state);
             self.render_desc_library(item_area2, buf, &resolved_state);
         }
+        self.library_rows_cache = Some(cache);
         if self.is_search_active {
             self.render_search_overlay(item_area1, buf);
         }
@@ -2124,99 +2111,30 @@ impl App {
     }
 
     fn render_info_pod_ep(&self, area: Rect, buf: &mut Buffer, list_state: &ListState) {
-        if self.titles_pod.is_empty() || self.authors_pod_ep.is_empty() {
-            log::error!("render_info_pod_ep: titles_pod or authors_pod_ep is empty. Cannot render episode info.");
-            Paragraph::new("Error: Podcast metadata missing.")
-                .left_aligned()
-                .block(theme::section_block("Info"))
-                .render(area, buf);
-            return;
-        }
-
-        let n = self.durations_pod_ep.len();
-        // Now safe to access index 0 as we've checked they are not empty
-        let duplicated_titles = vec![self.titles_pod[0].clone(); n];
-        let duplicated_authors = vec![self.authors_pod_ep[0].clone(); n];
-
-        if let Some(selected) = list_state.selected() {
-            log::debug!(
-                "render_info_pod_ep: selected={}, titles_pod.len={}, authors_pod_ep.len={}, durations_pod_ep.len={}, episodes_pod_ep.len={}, duplicated_titles.len={}, duplicated_authors.len={}",
-                selected,
-                self.titles_pod.len(),
-                self.authors_pod_ep.len(),
-                self.durations_pod_ep.len(),
-                self.episodes_pod_ep.len(),
-                duplicated_titles.len(),
-                duplicated_authors.len()
-            );
-
-            if selected < self.episodes_pod_ep.len() && selected < self.durations_pod_ep.len() {
-                 if selected < duplicated_titles.len() && selected < duplicated_authors.len() {
-                    Paragraph::new(format!("[{}] - Author: {} - Episode: {} - Duration: {} ",
-                            duplicated_titles[selected].trim(),
-                            duplicated_authors[selected].trim(),
-                            self.episodes_pod_ep[selected].trim(),
-                            self.durations_pod_ep[selected].trim(),
-                    ))
-                        .left_aligned()
-                        .block(theme::section_block("Info"))
-                        .render(area, buf);
-                 } else {
-                     log::error!("render_info_pod_ep: Index {} out of bounds for duplicated title/author vectors (len={})!", selected, duplicated_titles.len());
-                     Paragraph::new("Error: Episode info rendering mismatch.")
-                         .left_aligned()
-                         .block(theme::section_block("Info"))
-                         .render(area, buf);
-                 }
-            } else {
-                log::error!("render_info_pod_ep: Index {} out of bounds for episode/duration vectors (ep_len={}, dur_len={})!", selected, self.episodes_pod_ep.len(), self.durations_pod_ep.len());
-                Paragraph::new("Error: Episode data unavailable or index out of bounds.")
-                    .left_aligned()
-                    .block(theme::section_block("Info"))
-                    .render(area, buf);
-            }
-        }
+        Self::render_episode_info(area, buf, list_state, &self.titles_pod, &self.authors_pod_ep, &self.episodes_pod_ep, &self.durations_pod_ep);
     }
+
     fn render_info_pod_ep_search(&self, area: Rect, buf: &mut Buffer, list_state: &ListState) {
+        Self::render_episode_info(area, buf, list_state, &self.titles_pod_search, &self.authors_pod_ep_search, &self.episodes_pod_ep_search, &self.durations_pod_ep_search);
+    }
 
-        // Same guard as render_info_pod_ep: a podcast with episodes but null
-        // title/author metadata (collect_titles_pod/collect_authors_pod_ep only push
-        // when media.metadata is present) leaves these empty even though the episode
-        // list itself isn't.
-        if self.titles_pod_search.is_empty() || self.authors_pod_ep_search.is_empty() {
-            log::error!("render_info_pod_ep_search: titles_pod_search or authors_pod_ep_search is empty. Cannot render episode info.");
-            Paragraph::new("Error: Podcast metadata missing.")
-                .left_aligned()
-                .block(theme::section_block("Info"))
-                .render(area, buf);
-            return;
-        }
-
-        let n = self.durations_pod_ep_search.len();
-        let duplicated_titles_search = vec![self.titles_pod_search[0].clone(); n];
-        let duplicated_authors_search = vec![self.authors_pod_ep_search[0].clone(); n];
-        if let Some(selected) = list_state.selected() {
-            if selected < self.episodes_pod_ep_search.len()
-                && selected < self.durations_pod_ep_search.len()
-                && selected < duplicated_titles_search.len()
-                && selected < duplicated_authors_search.len() {
-                Paragraph::new(format!("[{}] - Author: {} - Episode: {} - Duration: {} ",
-                        duplicated_titles_search[selected].trim(),
-                        duplicated_authors_search[selected].trim(),
-                        self.episodes_pod_ep_search[selected].trim(),
-                        self.durations_pod_ep_search[selected].trim(),
-                ))
-                    .left_aligned()
-                    .block(theme::section_block("Info"))
-                    .render(area, buf);
-            } else {
-                log::error!("render_info_pod_ep_search: Index {selected} out of bounds for episode/duration/title/author vectors!");
-                Paragraph::new("Error: Episode data unavailable or index out of bounds.")
-                    .left_aligned()
-                    .block(theme::section_block("Info"))
-                    .render(area, buf);
+    // The show's title and author are only kept once (index 0) per opened podcast.
+    fn render_episode_info(area: Rect, buf: &mut Buffer, list_state: &ListState, titles: &[String], authors: &[String], episodes: &[String], durations: &[String]) {
+        let text = match (titles.first(), authors.first()) {
+            (Some(title), Some(author)) => {
+                let Some(selected) = list_state.selected() else { return };
+                match (episodes.get(selected), durations.get(selected)) {
+                    (Some(episode), Some(duration)) => format!("[{}] - Author: {} - Episode: {} - Duration: {} ",
+                        title.trim(), author.trim(), episode.trim(), duration.trim()),
+                    _ => "Error: Episode data unavailable or index out of bounds.".to_string(),
+                }
             }
-        }
+            _ => "Error: Podcast metadata missing.".to_string(),
+        };
+        Paragraph::new(text)
+            .left_aligned()
+            .block(theme::section_block("Info"))
+            .render(area, buf);
     }
 
     fn render_desc_pod_ep(&self, area: Rect, buf: &mut Buffer, list_state: &ListState) {

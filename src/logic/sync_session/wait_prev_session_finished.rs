@@ -40,7 +40,7 @@ pub fn owns_playback() -> bool {
 // on every track switch (confirmed live 2026-07-28: once from the previous track's own
 // quit-detection loop, once from the caller) - the concrete root cause behind bug_id
 // dd9a649.
-pub fn wait_prev_session_finished(username: String) -> Option<PlaybackTask> {
+pub async fn wait_prev_session_finished(username: String) -> Option<PlaybackTask> {
 
     let message = "Syncing your last listening session. Please wait...";
     let mut stdout = stdout();
@@ -76,7 +76,7 @@ pub fn wait_prev_session_finished(username: String) -> Option<PlaybackTask> {
                     claimed = true;
                     break;
                 }
-                std::thread::sleep(std::time::Duration::from_secs(1));
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 info!("[AppView::Home][loop][is_loop_break]");
                 let _ = pop_message(&mut stdout, 3, message);
             }

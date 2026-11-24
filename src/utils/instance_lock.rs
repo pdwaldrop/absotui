@@ -53,8 +53,16 @@ pub fn register() -> bool {
 /// Gives up this process's mark (it is exiting) and returns whether another Absotui
 /// is still running.
 pub fn others_running_at_exit() -> bool {
-    OWN_LOCK.lock().unwrap_or_else(|e| e.into_inner()).take();
+    release_own_lock();
     others_running(&lock_path())
+}
+
+fn release_own_lock() {
+    // Unlocked explicitly: a child process being started holds a copy of the file until it runs,
+    // so closing alone could leave the lock held a moment longer.
+    if let Some(file) = OWN_LOCK.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        let _ = file.unlock();
+    }
 }
 
 #[cfg(test)]
@@ -79,7 +87,7 @@ mod tests {
         let other = open(&path).unwrap();
         other.lock_shared().unwrap();
         assert!(others_running(&path));
-        drop(other);
+        other.unlock().unwrap();
         assert!(!others_running(&path));
     }
 
@@ -88,7 +96,7 @@ mod tests {
         let path = scratch_lock("registered");
         assert!(!register_at(&path));
         assert!(others_running(&path));
-        OWN_LOCK.lock().unwrap().take();
+        release_own_lock();
         assert!(!others_running(&path));
     }
 

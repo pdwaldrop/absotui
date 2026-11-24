@@ -1871,3 +1871,42 @@ Finished while paused at 0:00 live (the moved check is the same code; podcast fl
 **Open questions / handoff:** Not committed - waiting on Paul's go-ahead. A remaining VLC quirk, not changed: at exactly
 0:00 VLC reports no position, so the saved position isn't updated and a chapter jump from there is computed from the last
 known position. Remaining review findings 7-10 (per-frame costs, blocking sleep, long comments) are untouched.
+
+### 2026-11-24 — Claude Code (review findings 7-10, and a flaky test found on the way; uncommitted)
+
+**What changed:** Correction to the entry above first: findings 4-6 were committed and pushed with Paul's go-ahead as
+eaae9f6 (CI green on ubuntu and macOS); they are not in a release yet. Then findings 7-10:
+7. *Podcast episode Info panel:* it built a copy of the show's title and author for every episode on every frame just to
+   read the first; both Info panels (normal and search) now share one helper that reads them directly (`render_episode_info`
+   in `src/ui/tui.rs`), and the per-frame error logging there is gone.
+8. *Library rows:* the display string for every row and the series regroup were rebuilt on every frame. They are now cached
+   in `App::library_rows_cache` (`LibraryRowsCache`, `take_library_rows_cache`) keyed on the collection filter, the series
+   grouping and the library size - the Library data is only ever replaced by a full reload, never changed in place - and the
+   key handlers reuse the cache too (`library_row_count`).
+9. *`wait_prev_session_finished`* is async now: it waited with `std::thread::sleep` inside a spawned task, blocking a runtime
+   thread for up to 20 s; it uses `tokio::time::sleep` and the six call sites await it.
+10. *Comments:* the 101 comment blocks of 6+ lines (952 lines) were condensed to 1-3 lines each, keeping the non-obvious "why"
+   and dropping history, bug ids and test anecdotes (those live in git and here). One stray comment on the wrong function
+   (above `refresh_token_if_needed`) was removed. 33 files, about 800 fewer lines.
+Found while checking: `another_instance_holding_a_shared_lock_is_seen` and `a_registered_instance_is_seen_until_it_lets_go`
+(from b003306) failed about once in 40-60 full test runs. Cause: `clear_message`'s test asks crossterm for the terminal size,
+and with output that isn't a terminal crossterm runs `tput`; a process being started holds a copy of every open file until it
+runs, so a lock released only by closing its file could still look held. `instance_lock` now unlocks explicitly when letting go
+(`release_own_lock`, used by `others_running_at_exit`), which releases at once even then; the tests unlock the same way. The
+app was only exposed at quit, where a false "another copy is running" would have skipped stopping a stray player.
+
+**How it was verified:** `cargo build`, `cargo test` (164 passed, also single-threaded) and the CI clippy command are clean.
+Comment pass: a script compared every changed file with comments and blank lines removed against a snapshot taken just before
+it - identical in all 33 (the only code difference since then is the `instance_lock.rs` fix). Flaky test: bisected to the
+pairing with the `pop_up_message` tests (1/60 alone with them, 0/300 with nothing else); after the fix 0/200 for that pairing
+and 0/60 full runs. Live against a throwaway fake server with 5,000 books (50 series of 80 plus 1,000 standalone) and a 3-book
+collection, own config, runtime and mpv folders: grouping on and off, G/g/j landing on the right rows, the collection filter
+(3 books; grouped: series header with #79/#80, then the standalone) and back to Collections all correct; idle CPU on the
+grouped Library, release builds, 0.3% (v0.12.0) vs 0.0-0.1% (new), twice each. Playback through the async wait: play from
+Home, switch to another book mid-playback (1.3 s, one player throughout), stop and quit.
+
+**Not verified:** the podcast episode Info panel live (the fake had no podcast library; the helper is a straight rewrite of
+the two old functions minus the copies); macOS (CI runs the tests on push); very large real libraries.
+
+**Open questions / handoff:** Not committed - waiting on Paul's go-ahead. All ten 2026-11-21 review findings are now fixed;
+the next release (v0.12.1) would carry 4-9 (10 and the test fix are not user-visible).

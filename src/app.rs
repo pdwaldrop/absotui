@@ -70,6 +70,15 @@ pub enum LibraryRow {
     Book(usize),
 }
 
+/// Library's rows and their display titles, rebuilt only when the collection filter,
+/// series grouping or library changes - not on every frame.
+pub struct LibraryRowsCache {
+    key: (Option<usize>, bool, usize),
+    pub rows: Vec<LibraryRow>,
+    pub titles: Vec<String>,
+    pub book_count: usize,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AppView {
     Home,
@@ -205,6 +214,7 @@ pub struct App {
     // Settings > Downloads rows, loaded when the screen opens and whenever a download is added or removed.
     pub downloads_list: Vec<DownloadEntry>,
     pub downloads_list_version: u64,
+    pub library_rows_cache: Option<LibraryRowsCache>,
     pub _titles_cnt_list: Vec<String>,
     pub auth_names_cnt_list: Vec<String>,
     pub pub_year_cnt_list: Vec<String>,
@@ -1245,6 +1255,7 @@ impl App {
         list_state_settings_downloads,
         downloads_list: Vec::new(),
         downloads_list_version: 0,
+        library_rows_cache: None,
         _titles_cnt_list,
         auth_names_cnt_list,
         pub_year_cnt_list,
@@ -2393,7 +2404,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
 
                             // wait to close/sync the previous session first - see
                             // wait_prev_session_finished for what a None return means
-                            if let Some(_playback) = wait_prev_session_finished(username.clone()) {
+                            if let Some(_playback) = wait_prev_session_finished(username.clone()).await {
 
                             let mut stdout = stdout();
                             let _ = pop_message(&mut stdout, 3, message);
@@ -2421,7 +2432,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
 
                             // wait to close/sync the previous session first - see
                             // wait_prev_session_finished for what a None return means
-                            if let Some(_playback) = wait_prev_session_finished(username.clone()) {
+                            if let Some(_playback) = wait_prev_session_finished(username.clone()).await {
 
                             let mut stdout = stdout();
                             let _ = pop_message(&mut stdout, 3, message);
@@ -2555,7 +2566,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
 
                                 // wait to close/sync the previous session first - see
                                 // wait_prev_session_finished for what a None return means
-                                if let Some(_playback) = wait_prev_session_finished(username.clone()) {
+                                if let Some(_playback) = wait_prev_session_finished(username.clone()).await {
 
                                 let mut stdout = stdout();
                                 let _ = pop_message(&mut stdout, 3, message);
@@ -2610,7 +2621,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
 
                                 // wait to close/sync the previous session first - see
                                 // wait_prev_session_finished for what a None return means
-                                if let Some(_playback) = wait_prev_session_finished(username.clone()) {
+                                if let Some(_playback) = wait_prev_session_finished(username.clone()).await {
 
                                 let mut stdout = stdout();
                                 let _ = pop_message(&mut stdout, 3, message);
@@ -2642,7 +2653,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
 
                                     // wait to close/sync the previous session first - see
                                     // wait_prev_session_finished for what a None return means
-                                    if let Some(_playback) = wait_prev_session_finished(username.clone()) {
+                                    if let Some(_playback) = wait_prev_session_finished(username.clone()).await {
 
                                     let mut stdout = stdout();
                                     let _ = pop_message(&mut stdout, 3, message);
@@ -2672,7 +2683,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
 
                                     // wait to close/sync the previous session first - see
                                     // wait_prev_session_finished for what a None return means
-                                    if let Some(_playback) = wait_prev_session_finished(username.clone()) {
+                                    if let Some(_playback) = wait_prev_session_finished(username.clone()).await {
 
                                     let mut stdout = stdout();
                                     let _ = pop_message(&mut stdout, 3, message);
@@ -2777,6 +2788,44 @@ pub fn build_home_rows(&self) -> Vec<HomeRow> {
     rows
 }
 
+fn library_rows_key(&self) -> (Option<usize>, bool, usize) {
+    (self.active_collection, self.is_library_grouped_by_series, self.titles_library.len())
+}
+
+fn current_library_rows_cache(&self) -> Option<&LibraryRowsCache> {
+    self.library_rows_cache.as_ref().filter(|cache| cache.key == self.library_rows_key())
+}
+
+fn library_row_count(&self) -> usize {
+    self.current_library_rows_cache().map_or_else(|| self.build_library_rows().len(), |cache| cache.rows.len())
+}
+
+/// Takes the Library rows cache out (rebuilding it if stale) for the caller to use and put back.
+pub fn take_library_rows_cache(&mut self) -> LibraryRowsCache {
+    let key = self.library_rows_key();
+    if let Some(cache) = self.library_rows_cache.take()
+        && cache.key == key {
+            return cache;
+    }
+    let rows = self.build_library_rows();
+    let titles = rows.iter().map(|row| match row {
+        LibraryRow::SeriesHeader(name) => format!("▸ {name}"),
+        LibraryRow::Book(i) => {
+            let title = &self.titles_library[*i];
+            if self.is_library_grouped_by_series {
+                match self.series_sequence_library.get(*i).copied().flatten() {
+                    Some(seq) => format!("  #{seq} {title}"),
+                    None => format!("  {title}"),
+                }
+            } else {
+                title.clone()
+            }
+        }
+    }).collect();
+    let book_count = rows.iter().filter(|row| matches!(row, LibraryRow::Book(_))).count();
+    LibraryRowsCache { key, rows, titles, book_count }
+}
+
 /// Flattens the Library list into rows, splicing in a `SeriesHeader` row above each
 /// series' books (sorted by sequence number) when `is_library_grouped_by_series` is
 /// set, and scoping to `active_collection`'s books first when one is filtering
@@ -2828,7 +2877,10 @@ fn group_library_rows(indices: Vec<usize>, series_names: &[Option<String>], seri
 /// or nothing selected. Shared by rendering (Info/Description panels) and the Enter
 /// dispatch, so both agree on which row a given selection actually means.
 pub fn selected_library_book_index(&self) -> Option<usize> {
-    Self::resolve_library_book_index(self.list_state_library.selected(), &self.build_library_rows())
+    match self.current_library_rows_cache() {
+        Some(cache) => Self::resolve_library_book_index(self.list_state_library.selected(), &cache.rows),
+        None => Self::resolve_library_book_index(self.list_state_library.selected(), &self.build_library_rows()),
+    }
 }
 
 /// Same resolution as `selected_library_book_index`, but against already-computed
@@ -2853,7 +2905,7 @@ pub fn select_next(&mut self) {
                 self.list_state_cnt_list.select_first();
             }}}
         AppView::Library => { if let Some(selected) = self.list_state_library.selected() {
-            if selected + 1  < self.build_library_rows().len() {
+            if selected + 1  < self.library_row_count() {
                 self.list_state_library.select_next();
             } else {
                 self.list_state_library.select_first();
@@ -2961,7 +3013,7 @@ pub fn select_previous(&mut self) {
             if selected > 0 {
                 self.list_state_library.select_previous();
             } else {
-                self.list_state_library.select(Some(self.build_library_rows().len().saturating_sub(1)));
+                self.list_state_library.select(Some(self.library_row_count().saturating_sub(1)));
             }}}
         AppView::Collections => { if let Some(selected) = self.list_state_collections.selected() {
             if selected > 0 {
@@ -3076,7 +3128,7 @@ pub fn select_last(&mut self) {
             self.list_state_cnt_list.select(self.build_home_rows().len().checked_sub(1));
         }
         AppView::Library => {
-            self.list_state_library.select(self.build_library_rows().len().checked_sub(1));
+            self.list_state_library.select(self.library_row_count().checked_sub(1));
         }
         AppView::Collections => {
             self.list_state_collections.select(self.collection_names.len().checked_sub(1));
