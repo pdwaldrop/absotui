@@ -26,7 +26,7 @@ use crate::logic::handle_input::handle_add_podcast::create_and_seed_podcast;
 use crate::logic::server_recovery::{diagnose_rejected_login, LoginProblem};
 use crate::config::{ConfigFile, load_config, set_backend};
 use crate::db::crud::{downloads_version, get_is_show_key_bindings, update_is_show_key_bindings, get_is_speed_adjusted_time, update_is_speed_adjusted_time, update_is_podcast_autoplay, delete_user, update_id_selected_lib, get_listening_session, get_is_vlc_running, update_is_per_item_speed, update_is_finished, get_is_auto_download, update_is_auto_download, update_pending_seek, update_login_err, update_user_tokens};
-use crate::api::server::refresh_token::{maybe_refresh_token, refresh_now, sync_clock_with_server, RefreshOutcome};
+use crate::api::server::refresh_token::{maybe_refresh_token, refresh_due, refresh_now, sync_clock_with_server, RefreshOutcome};
 use crate::db::database_struct::Database;
 use crate::utils::convert_seconds::format_duration;
 use crate::utils::download_cache::{is_downloaded, remove_download, download_book, download_episode, sync_auto_downloads, sync_auto_downloads_podcasts, list_downloads_on_disk, DownloadEntry};
@@ -188,6 +188,8 @@ pub struct App {
     pub id_selected_lib: String,
     pub token: Option<String>,
     pub refresh_token: Option<String>,
+    // Set while a background token refresh is in flight - see `refresh_token_if_needed`.
+    token_refresh_receiver: Option<tokio::sync::oneshot::Receiver<(RefreshOutcome, String, String)>>,
     pub should_exit: bool,
     pub list_state_cnt_list: ListState,
     pub list_state_library: ListState,
@@ -1143,6 +1145,7 @@ impl App {
         id_selected_lib,
         token: Some(token),
         refresh_token: Some(refresh_token),
+        token_refresh_receiver: None,
         should_exit: false,
         list_state_cnt_list,
         list_state_library,
@@ -1302,22 +1305,48 @@ impl App {
     })
     }
 
-    /// Renews the access token before it expires (called every main-loop tick) and updates it in place.
-    /// Playback tasks keep their own copy fresh the same way (see `maybe_refresh_token`).
-    pub async fn refresh_token_if_needed(&mut self) {
-        let Some(mut token) = self.token.clone() else { return; };
-        let Some(mut refresh_token) = self.refresh_token.clone() else { return; };
+    /// Renews the access token before it expires (checked every main-loop tick). The request runs in the
+    /// background, so a slow or unreachable server never holds up the screen. Playback tasks keep their
+    /// own copy fresh with `maybe_refresh_token`.
+    pub fn refresh_token_if_needed(&mut self) {
+        if let Some(rx) = self.token_refresh_receiver.as_mut() {
+            match rx.try_recv() {
+                Ok((outcome, token, refresh_token)) => {
+                    self.token_refresh_receiver = None;
+                    self.apply_token_refresh(outcome, token, refresh_token);
+                }
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
+                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => self.token_refresh_receiver = None,
+            }
+            return;
+        }
 
-        match maybe_refresh_token(&mut token, &mut refresh_token, &self.username, &self.server_address).await {
+        let (Some(token), Some(refresh_token)) = (self.token.clone(), self.refresh_token.clone()) else { return };
+        if !refresh_due(&token, &refresh_token, &self.server_address) {
+            return;
+        }
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let username = self.username.clone();
+        let server_address = self.server_address.clone();
+        tokio::spawn(async move {
+            let (mut token, mut refresh_token) = (token, refresh_token);
+            let outcome = refresh_now(&mut token, &mut refresh_token, &username, &server_address).await;
+            let _ = tx.send((outcome, token, refresh_token));
+            crate::utils::wake::wake_main_loop();
+        });
+        self.token_refresh_receiver = Some(rx);
+    }
+
+    fn apply_token_refresh(&mut self, outcome: RefreshOutcome, token: String, refresh_token: String) {
+        match outcome {
             RefreshOutcome::Refreshed => {
                 self.token = Some(token);
                 self.refresh_token = Some(refresh_token);
             }
             RefreshOutcome::Failed => {
-                // Refresh token itself is dead (30 days idle, or server-revoked) -
-                // matches the existing Settings > Account "remove account" precedent:
-                // delete the row and rely on the user restarting the app, since there's
-                // no existing live in-process path back to the login screen.
+                // The refresh token is dead (revoked, password changed, expired): delete the saved login, as
+                // Settings > Account does, and never send it again - retrying looped as fast as the server answered.
+                self.refresh_token = None;
                 let _ = delete_user(&self.username);
                 let _ = update_login_err("Your session expired - restart Absotui to log in again");
             }
@@ -1446,6 +1475,9 @@ impl App {
                 // otherwise silently point at a different episode once the list shifts.
                 self.list_state_cnt_list.select(Some(new_pos));
         }
+        // Neither episode is listed any more and the list may have shrunk below the cursor.
+        let selected = clamp_selection(self.list_state_cnt_list.selected(), self.ids_ep_cnt_list.len());
+        self.list_state_cnt_list.select(selected);
     }
 
     // Applies a permutation to every one of the podcast Home list's parallel arrays at
@@ -3188,6 +3220,39 @@ mod library_row_tests {
             LibraryRow::Book(i) => format!("B:{i}"),
         }).collect();
         assert_eq!(row_kinds, vec!["H:Solo", "B:1", "B:0"]);
+    }
+}
+
+/// A list cursor after the list changed length: past the end moves to the last row, and a list that
+/// has rows again gets its first one selected.
+fn clamp_selection(selected: Option<usize>, len: usize) -> Option<usize> {
+    match selected {
+        Some(i) if i >= len => len.checked_sub(1),
+        None if len > 0 => Some(0),
+        other => other,
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::clamp_selection;
+
+    #[test]
+    fn a_cursor_past_the_end_moves_to_the_last_row() {
+        assert_eq!(clamp_selection(Some(4), 3), Some(2));
+        assert_eq!(clamp_selection(Some(3), 3), Some(2));
+    }
+
+    #[test]
+    fn a_cursor_inside_the_list_stays_put() {
+        assert_eq!(clamp_selection(Some(1), 3), Some(1));
+    }
+
+    #[test]
+    fn an_empty_list_has_no_cursor_until_it_has_rows_again() {
+        assert_eq!(clamp_selection(Some(0), 0), None);
+        assert_eq!(clamp_selection(None, 0), None);
+        assert_eq!(clamp_selection(None, 2), Some(0));
     }
 }
 

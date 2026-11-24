@@ -1726,7 +1726,7 @@ impl App {
         // are spliced in, so this has to go through the same row-building the list itself
         // used, or it reads (or panics on) the wrong entry.
         let selected = if self.is_podcast {
-            list_state.selected()
+            list_state.selected().filter(|&i| i < self._ids_cnt_list.len())
         } else {
             list_state.selected().and_then(|i| self.build_home_rows().get(i).map(|row| match row {
                 HomeRow::Book(book_i) => *book_i,
@@ -1770,7 +1770,7 @@ impl App {
     fn render_desc_home(&mut self, area: Rect, buf: &mut Buffer, list_state: &ListState) {
         // See render_info_home - chapter rows resolve back to their parent book's index.
         let selected = if self.is_podcast {
-            list_state.selected()
+            list_state.selected().filter(|&i| i < self._ids_cnt_list.len())
         } else {
             list_state.selected().and_then(|i| self.build_home_rows().get(i).map(|row| match row {
                 HomeRow::Book(book_i) => *book_i,

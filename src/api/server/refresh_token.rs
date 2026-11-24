@@ -199,10 +199,20 @@ pub async fn maybe_refresh_token(
     if refresh_token.is_empty() || !is_token_expiring_soon(token) {
         return RefreshOutcome::NotNeeded;
     }
-    if transient_failures().get(server_address).is_some_and(|at| at.elapsed() < TRANSIENT_RETRY_AFTER) {
+    if in_transient_backoff(server_address) {
         return RefreshOutcome::TransientError;
     }
     refresh_now(token, refresh_token, username, server_address).await
+}
+
+fn in_transient_backoff(server_address: &str) -> bool {
+    transient_failures().get(server_address).is_some_and(|at| at.elapsed() < TRANSIENT_RETRY_AFTER)
+}
+
+/// Whether `maybe_refresh_token` would contact the server right now - lets the main loop check
+/// cheaply and run the refresh itself in the background.
+pub fn refresh_due(token: &str, refresh_token: &str, server_address: &str) -> bool {
+    !refresh_token.is_empty() && is_token_expiring_soon(token) && !in_transient_backoff(server_address)
 }
 
 /// Refreshes whatever the token's own expiry says - for when the server has just rejected
@@ -316,6 +326,20 @@ mod tests {
         // No dots at all - a legacy Audiobookshelf `token` (pre-JWT auth) or any other
         // opaque string. This is what makes maybe_refresh_token a no-op for it.
         assert!(!is_token_expiring_soon("not-a-jwt-at-all"));
+    }
+
+    #[test]
+    fn a_refresh_is_due_only_near_expiry_with_a_refresh_token_and_outside_the_backoff() {
+        let now = chrono::Utc::now().timestamp();
+        let expiring = fake_jwt_with_exp(now + 60);
+        let fresh = fake_jwt_with_exp(now + 3600);
+        let server = "http://refresh-due.invalid";
+        assert!(refresh_due(&expiring, "refresh", server));
+        assert!(!refresh_due(&fresh, "refresh", server));
+        assert!(!refresh_due(&expiring, "", server));
+        transient_failures().insert(server.to_string(), Instant::now());
+        assert!(!refresh_due(&expiring, "refresh", server));
+        transient_failures().remove(server);
     }
 
     #[tokio::test]

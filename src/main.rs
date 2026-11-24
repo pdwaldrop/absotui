@@ -173,12 +173,9 @@ async fn main() -> Result<()> {
             app.poll_podcast_home_refresh();
             app.refresh_podcast_home_if_stale(is_playing == "1");
 
-            // Keeps the access token from ever reaching Audiobookshelf's ~1 hour
-            // default expiry while the app is open and in use - see
-            // App::refresh_token_if_needed's doc comment. Cheap no-op check on every
-            // tick; an actual network refresh happens roughly once every ~50 minutes
-            // at most.
-            app.refresh_token_if_needed().await;
+            // Keeps the access token from reaching Audiobookshelf's ~1 hour expiry while the app is open; the
+            // request itself (about once every 50 minutes) runs in the background.
+            app.refresh_token_if_needed();
 
             // Merges the background podcast-episode-list fetch spawned in App::new()
             // into the live app the moment it's ready (see bug_id 3f729c) - a no-op

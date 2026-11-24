@@ -1936,3 +1936,57 @@ inspected, not run; the AppImage was not run through FUSE; the new code on Paul'
 **Open questions / handoff:** All ten 2026-11-21 review findings are released. Paul's installed copy is v0.12.0 until he runs
 `absotui --update`. If the macOS CI job keeps failing to get a runner, moving it to its own workflow (so the README badge only
 covers Linux) was offered on 11-21 and not taken up.
+
+### 2026-11-24 — Claude Code (second code review; findings 1-3 fixed, uncommitted)
+
+**What changed:** Paul asked for another review of `src` for bugs and optimization. It found 10 items, ranked; he
+asked to fix the top three.
+1. *A rejected token refresh retried forever:* when the server refused the refresh token while the app was open
+   (password change, "log out all devices", a 30-day session expiry, a deactivated user), the main loop deleted the
+   saved login and then retried the dead token on every iteration - and the database write it made woke the loop
+   again, so it ran as fast as the server answered. Now `apply_token_refresh` (`src/app.rs`) drops the dead refresh
+   token after the first rejection.
+2. *Podcast Home crashed* ("index out of bounds" in `render_info_home`) when the selected episode left New &
+   Unfinished (finished on another device, dropped by the server) and the list became shorter than the cursor
+   position. `apply_podcast_home_data` now keeps the cursor on a real row (`clamp_selection`: past the end goes to
+   the last row, a list that gets rows again selects the first), and the Home Info/Description panels ignore a stale
+   podcast index.
+3. *The token refresh froze the screen:* the main loop awaited the refresh request itself, so a slow server froze the
+   UI for the whole request (up to 60 s), and an unreachable one for the 10 s connect timeout on every retry.
+   `refresh_token_if_needed` now runs the request in a background task and applies the result when it lands, like the
+   podcast Home refresh; `refresh_due` (`src/api/server/refresh_token.rs`) is the cheap check that decides when.
+
+**How it was verified:** `cargo build`, `cargo test --locked` (168 passed: 164 plus 4 new - `refresh_due`, and three
+for `clamp_selection`) and the CI clippy command are clean. Live against a throwaway fake Audiobookshelf (podcast
+library, own config and runtime folders; Paul's running copy, config and server untouched), v0.12.1 code vs the fix:
+- Refresh token rejected (401): before, about 500 refresh requests a second, about 50% CPU and the log growing about
+  60 KB a second; after, 1 request in the following 30 s, the saved login removed with the "session expired" note
+  stored for the next launch, the app still responsive at 1.9% CPU (debug build).
+- Episode list shrinking from 5 to 3 under a cursor on the 5th: before, the panic above; after, the cursor moves to
+  the new last row and keys work; a list that goes empty and then refills gets its first row selected; when the list
+  grows back the cursor follows its episode.
+- Refresh request hanging 20 s: before, a key press waited 20.6 s; after, three key presses during the hang each
+  showed in 4 ms. The slow refresh's new token is applied (the next refresh comes one token lifetime later, not
+  straight away). A 502 still retries every 15 s and keeps the login.
+
+**Not verified:** a real Audiobookshelf (only the fake; the 401/502 behavior and the refresh grace period were read
+from the server's `TokenManager.js`); macOS (CI covers the tests on push); a refresh landing during `R` (the old
+`App` and its result are simply dropped; the new `App` reads the tokens from the database).
+
+**Open questions / handoff:** Not committed - waiting on Paul's go-ahead; no changelog entry yet. The rest of the
+review, not fixed: lists drop their scroll position every frame (each `render_list` call gets a clone of the
+`ListState`, so moving up from the bottom scrolls the list with the cursor stuck on the last row - reproduced); an empty
+episode list logs a warning every frame (reproduced, 4 lines a second); times under a minute show as "0:5"
+(`format_time`); `d` on Home can delete the files of what's playing (Settings > Downloads refuses); podcast-search
+covers aren't status-checked and cover files aren't written atomically (a bad file is never re-fetched and is re-read
+and re-decoded every frame); `player_info` runs every frame even when nothing plays; `apply_player_backend`'s doc
+comment sits on `reload_downloads_list`.
+
+Found while finishing, not fixed (reproduced with a series header; the empty-Home case is from reading): pressing Enter (`l`) where there is nothing to play - a series header
+in a grouped book Library, or an empty Home list - stops whatever is playing and then blocks every later play until
+Absotui is restarted. The key handler quits the player and claims the playback slot (`wait_prev_session_finished`),
+then `handle_l_book` (and the podcast variants' early `return`s) find no valid selection and return without giving the
+slot back (`is_loop_break` stays "0"). Live: after Enter on a series header, Enter on a real book showed "Syncing your
+last listening session. Please wait..." for 20 s, gave up, and no play request reached the server; the same book plays
+normally without the header press. Fix idea: don't spawn the play task at all when nothing playable is selected, and
+have every early return give the slot back.
