@@ -1910,3 +1910,29 @@ the two old functions minus the copies); macOS (CI runs the tests on push); very
 
 **Open questions / handoff:** Not committed - waiting on Paul's go-ahead. All ten 2026-11-21 review findings are now fixed;
 the next release (v0.12.1) would carry 4-9 (10 and the test fix are not user-visible).
+
+### 2026-11-24 — Claude Code (v0.12.1 release; AUR draft bumped)
+
+**What changed:** With Paul's go-ahead the findings 7-10 work went to `main` as two commits - 12f2159 (Library rows cached,
+episode Info panel copies removed, async `wait_prev_session_finished`, the instance-lock test fix) and 7c8b50b (the
+comment-only pass) - and v0.12.1 (patch) was cut. It carries everything since v0.12.0: eaae9f6 (paused in a track's first
+second, paused seeks with VLC, player closed at the end), 12f2159 and 7c8b50b. The v0.12.0 changelog entry was frozen and a
+v0.12.1 one added (a17a940); the workflow's bump commit is c74b189. The AUR draft is at 0.12.1 (only the two tarball checksums
+changed).
+
+**How it was verified:** `cargo test` (164 passed) and the CI clippy command clean at each commit; CI on a17a940 passed on
+ubuntu and, after a re-run, macOS (the first attempt's macOS job never got a runner - GitHub capacity, same as on 11-12).
+Cut Release and Release succeeded on the first attempt (all three builds and the checksum job); all 12 assets are on the
+release, downloaded fresh, and every file matches `SHA256SUMS.txt`. The x86_64 binary and AppImage report 0.12.1; all three
+binaries contain the new changelog entry, the frozen v0.12.0 one and the instance lock. Highest glibc requirement unchanged:
+2.34 (x86_64), 2.18 (aarch64); the macOS tarball is a universal binary. `main`, `stable` and the tag sit on the bump commit and
+the four files the installer fetches from `stable` are byte-identical to the release assets. AUR: the sources match
+`SHA256SUMS.txt`, `makepkg -f --nodeps` passed all four host checksums and the packaged binary reports 0.12.1 with no missing
+libraries.
+
+**Not verified:** a real `absotui --update` or fresh install from this release; the aarch64 and macOS binaries were
+inspected, not run; the AppImage was not run through FUSE; the new code on Paul's real server and setup.
+
+**Open questions / handoff:** All ten 2026-11-21 review findings are released. Paul's installed copy is v0.12.0 until he runs
+`absotui --update`. If the macOS CI job keeps failing to get a runner, moving it to its own workflow (so the README badge only
+covers Linux) was offered on 11-21 and not taken up.
