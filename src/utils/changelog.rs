@@ -1535,8 +1535,7 @@ let changelog_88 = "Changelog Absotui v0.11.9 (12/11/2026) \n\
          Enjoy!\n
          ####\n".to_string();
 
-let changelog_89 = format!(
-    "Changelog Absotui v{VERSION} (21/11/2026) \n\
+let changelog_89 = "Changelog Absotui v0.12.0 (21/11/2026) \n\
          \n\
          New:\n\
          - Settings > Downloads lists everything you've downloaded for\n\
@@ -1560,10 +1559,32 @@ let changelog_89 = format!(
            Download is on, so they're handled as before.\n\
          \n\
          Enjoy!\n
+         ####\n".to_string();
+
+let changelog_90 = format!(
+    "Changelog Absotui v{VERSION} (24/11/2026) \n\
+         \n\
+         Fixed:\n\
+         - Pausing right at the start of a track, or jumping back to 0:00\n\
+           while paused, stopped chapter jumps and Mark Finished from\n\
+           working until you pressed play again.\n\
+         - With VLC, skipping or jumping chapters while paused started\n\
+           playback again but the player bar kept saying paused - it now\n\
+           shows playing. VLC also ignored about half of those while\n\
+           paused; they now land.\n\
+         \n\
+         Changed:\n\
+         - The player now closes when a book or episode finishes, instead\n\
+           of staying open in the background (with full VLC, its window).\n\
+         - Large libraries use less CPU in Library, especially grouped by\n\
+           series, and so does a podcast's episode list.\n\
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_90);
     changelog.push_str(&changelog_89);
     changelog.push_str(&changelog_88);
     changelog.push_str(&changelog_87);
