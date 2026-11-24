@@ -8,7 +8,7 @@ use crate::api::sessions::sync_open_session::sync_session;
 use crate::api::sessions::close_open_session::close_session_without_send_prg_data;
 use std::io::stdout;
 use log::{info, error};
-use crate::db::crud::{insert_listening_session, update_is_vlc_running, update_current_time, get_speed_rate, update_elapsed_time, update_is_finished, update_is_loop_break, get_download, get_listening_session, update_pending_seek, delete_user, update_login_err};
+use crate::db::crud::{insert_listening_session, update_is_vlc_running, update_current_time, get_speed_rate, update_elapsed_time, update_is_finished, update_is_loop_break, get_download, get_listening_session, update_pending_seek, update_is_playback, delete_user, update_login_err};
 use crate::api::server::refresh_token::{maybe_refresh_token, RefreshOutcome};
 use crate::db::database_struct::DownloadedItem;
 use crate::utils::convert_seconds::progress_time_diff;
@@ -171,10 +171,14 @@ pub async fn handle_l_book(
 
                                 if target_track_idx == current_track_idx {
                                     let _ = session.seek_to(relative_target);
+                                    if session.seek_resumes_playback() {
+                                        let _ = update_is_playback("1", info_item[3].as_str());
+                                    }
                                 } else {
                                     current_track_idx = target_track_idx;
                                     track_base_offset = target_track_base;
                                     session.switch_track(book_track(current_track_idx, relative_target)).await;
+                                    let _ = update_is_playback("1", info_item[3].as_str());
 
                                     last_current_time = 3;
                                     progress_sync = 3;
@@ -228,6 +232,7 @@ pub async fn handle_l_book(
                                     trigger += 1;
                                 }
                             }
+                            PlaybackStatus::Waiting => {}
                             // The track ended naturally but the player is still open - distinct
                             // from Closed below, where the user closed the player itself.
                             PlaybackStatus::Finished => {
@@ -250,6 +255,7 @@ pub async fn handle_l_book(
                                     continue;
                                 }
 
+                                let _ = session.quit_gracefully();
                                 let is_finised = true;
                                 info!("[handle_l_book][Finished] Track finished");
 
@@ -392,10 +398,14 @@ async fn handle_l_book_offline(
 
                 if target_track_idx == current_track_idx {
                     let _ = session.seek_to(relative_target);
+                    if session.seek_resumes_playback() {
+                        let _ = update_is_playback("1", id_session.as_str());
+                    }
                 } else {
                     current_track_idx = target_track_idx;
                     track_base_offset = target_track_base;
                     session.switch_track(offline_track(current_track_idx, relative_target)).await;
+                    let _ = update_is_playback("1", id_session.as_str());
                 }
         }
 
@@ -405,6 +415,7 @@ async fn handle_l_book_offline(
                 last_position = Some(book_wide_time);
                 let _ = update_current_time(book_wide_time, id_session.as_str());
             }
+            PlaybackStatus::Waiting => {}
             PlaybackStatus::Finished => {
                 let book_wide_time = last_position.unwrap_or(current_time);
                 if current_track_idx + 1 < downloaded.tracks.len() {
@@ -419,6 +430,7 @@ async fn handle_l_book_offline(
                     continue;
                 }
 
+                let _ = session.quit_gracefully();
                 info!("[handle_l_book_offline][Finished] Track finished");
                 let _ = update_is_finished("1", id_session.as_str());
                 // Best-effort only - ignored whether the server is back or not.

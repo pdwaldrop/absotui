@@ -148,6 +148,12 @@ impl Player {
         self.control(|stream| vlc_seek(stream, &seconds.to_string()), json!(["seek", seconds, "absolute"]))
     }
 
+    /// VLC only seeks reliably as pause, seek, play (see vlc_seek), so a seek leaves it
+    /// playing even if it was paused; mpv keeps its pause state.
+    pub fn seek_resumes_playback(&self) -> bool {
+        matches!(self, Self::Vlc(_))
+    }
+
     pub fn set_speed(&self, speed_rate: &str) -> io::Result<()> {
         self.control(|stream| writeln!(stream, "rate {speed_rate}"), json!(["set", "speed", speed_rate]))
     }
@@ -188,12 +194,14 @@ fn vlc_program(cvlc: &str) -> String {
     }
 }
 
-// Without pause => seek => play, VLC's buffer can freeze the player.
+// Without pause => seek => play, VLC's buffer can freeze the player (seeking a paused VLC
+// without it lost seeks or froze playback for seconds). Sent as one write: as separate
+// writes, a seek on a paused VLC was often dropped.
 fn vlc_seek(stream: &mut TcpStream, target: &str) -> io::Result<()> {
-    writeln!(stream, "pause")?;
-    writeln!(stream, "seek {target}")?;
     if cfg!(target_os = "macos") {
+        writeln!(stream, "pause\nseek {target}")?;
         thread::sleep(Duration::from_millis(500));
+        return writeln!(stream, "play");
     }
-    writeln!(stream, "play")
+    stream.write_all(format!("pause\nseek {target}\nplay\n").as_bytes())
 }

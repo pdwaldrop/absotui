@@ -160,58 +160,48 @@ pub async fn handle_l_pod_home(
                     break 'episodes;
                 }
 
+                // Marked finished while playing (F in the Home list): the key handler can't
+                // touch the player (this task owns it), so it flips listening_session.is_finished
+                // and this stops playback within about a second, playing or not.
+                if let Ok(Some(listening_session)) = get_listening_session()
+                    && listening_session.is_finished {
+                        info!("[handle_l_pod_home][ManualFinish] Marked finished while playing, stopping");
+                        let _ = session.quit();
+
+                        // Full duration rather than wherever playback stopped: the server's
+                        // "New & Unfinished" view recomputes finished-status from progress%.
+                        let duration_secs = info_item[2].parse::<f64>()
+                            .map(|d| d.round() as u32)
+                            .unwrap_or_else(|_| last_position.unwrap_or(current_time));
+
+                        let next_episode = finish_episode(
+                            &token,
+                            &id,
+                            &id_pod_ep,
+                            duration_secs,
+                            &info_item[2],
+                            info_item[3].as_str(),
+                            username.as_str(),
+                            &server_address,
+                            &id_selected_lib,
+                            newest_first,
+                            current_published_at,
+                        ).await;
+
+                        if let Some((next_id, next_id_pod, next_published_at)) = next_episode {
+                            info!("[handle_l_pod_home][ManualFinish] Autoplay is on, advancing to next episode");
+                            id = next_id;
+                            id_pod_ep = next_id_pod;
+                            current_published_at = Some(next_published_at);
+                            continue 'episodes;
+                        }
+                        let _ = update_is_loop_break("1", username.as_str());
+                        break 'episodes;
+                }
+
                 match session.next_status().await {
                     PlaybackStatus::Playing(position) => {
                         last_position = Some(position);
-
-                        // Manually marked finished while still playing (F in the Home
-                        // list) - the key handler can't touch the player directly (this
-                        // task owns it exclusively), so it just flips
-                        // listening_session.is_finished as a signal. Checked first,
-                        // before the normal per-second bookkeeping below, so playback
-                        // actually stops within about a second instead of waiting on
-                        // the natural Finished status - unlike that natural
-                        // end-of-track case, the player is still actively playing here
-                        // and has to be told to stop, not just detected as already
-                        // having done so.
-                        if let Ok(Some(listening_session)) = get_listening_session()
-                            && listening_session.is_finished {
-                                info!("[handle_l_pod_home][ManualFinish] Marked finished while playing, stopping");
-                                let _ = session.quit();
-
-                                // Report full duration as the current_time, not
-                                // wherever playback happened to be interrupted - the
-                                // server's own "New & Unfinished" view recomputes
-                                // finished-status from progress%, so isFinished=true
-                                // at a partial percentage doesn't stick (matches the
-                                // not-currently-playing branch in app.rs's F handler,
-                                // which does the same for the same reason).
-                                let duration_secs = info_item[2].parse::<f64>().map(|d| d.round() as u32).unwrap_or(position);
-
-                                let next_episode = finish_episode(
-                                    &token,
-                                    &id,
-                                    &id_pod_ep,
-                                    duration_secs,
-                                    &info_item[2],
-                                    info_item[3].as_str(),
-                                    username.as_str(),
-                                    &server_address,
-                                    &id_selected_lib,
-                                    newest_first,
-                                    current_published_at,
-                                ).await;
-
-                                if let Some((next_id, next_id_pod, next_published_at)) = next_episode {
-                                    info!("[handle_l_pod_home][ManualFinish] Autoplay is on, advancing to next episode");
-                                    id = next_id;
-                                    id_pod_ep = next_id_pod;
-                                    current_published_at = Some(next_published_at);
-                                    continue 'episodes;
-                                }
-                                let _ = update_is_loop_break("1", username.as_str());
-                                break 'episodes;
-                        }
 
                         let _ = update_current_time(position, info_item[3].as_str());
 
@@ -252,7 +242,9 @@ pub async fn handle_l_pod_home(
                     }
                     // The track ended naturally but the player is still open - distinct
                     // from Closed below, where the user closed the player itself.
+                    PlaybackStatus::Waiting => {}
                     PlaybackStatus::Finished => {
+                        let _ = session.quit_gracefully();
                         info!("[handle_l_pod_home][Finished] Track finished");
 
                         // Podcast Autoplay: if on, and the live "New & Unfinished"

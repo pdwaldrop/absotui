@@ -201,7 +201,9 @@ pub async fn handle_l_pod(
                                     // The track ended naturally but the player is still open -
                                     // distinct from Closed below, where the user closed the
                                     // player itself.
+                                    PlaybackStatus::Waiting => {}
                                     PlaybackStatus::Finished => {
+                                        let _ = session.quit_gracefully();
                                         let position = last_position.unwrap_or(current_time);
                                         let is_finised = true;
                                         info!("[handle_l_pod][Finished] Track finished");

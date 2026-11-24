@@ -92,7 +92,9 @@ pub async fn handle_pod_episode_offline(
                 last_position = Some(position);
                 let _ = update_current_time(position, id_session.as_str());
             }
+            PlaybackStatus::Waiting => {}
             PlaybackStatus::Finished => {
+                let _ = session.quit_gracefully();
                 let position = last_position.unwrap_or(current_time);
                 info!("[handle_pod_episode_offline][Finished] Track finished");
                 let _ = update_is_finished("1", id_session.as_str());

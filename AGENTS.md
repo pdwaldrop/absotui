@@ -1836,3 +1836,38 @@ were against fake servers).
 **Open questions / handoff:** Paul's installed copy is v0.11.9 until he runs `absotui --update`; the first launch of
 0.12.0 on his machine will not re-send old progress, and his existing downloads count as automatic only if Auto Download
 is on. Remaining review findings 4-10 are untouched.
+
+### 2026-11-21 — Claude Code (review findings 4-6: playback edge cases, uncommitted)
+
+**What changed:** Paul asked for findings 4-6 from the 2026-11-21 review.
+4. *Paused in a track's first second (or after a jump to 0:00 while paused):* the player reports no position under 1 s,
+   and `PlayerSession::next_status` looped until it did, so the playback task stopped handling chapter jumps, token
+   refresh and Mark Finished. It now returns a new `PlaybackStatus::Waiting` about once a second (`src/player/session.rs`;
+   fast 150 ms polling only while a track is opening), every playback loop treats it as "nothing to record", and podcast
+   Home's Mark Finished check moved to the top of its loop so it also works then.
+5. *Seeking while paused:* VLC can only seek reliably as pause-seek-play, which leaves it playing, while the player bar
+   still said paused. A seek now marks playback as resumed when the player is VLC (`Player::seek_resumes_playback`; mpv
+   keeps its pause and the flag). Also, a chapter jump into another file of a multi-file book marks it playing (the new
+   file always starts playing). While testing, VLC turned out to drop roughly half the seeks sent to it while paused - in
+   v0.11.9 too - because the three commands went out as three writes; on Linux they now go as one write, and all 8 test
+   seeks from paused and 6 while playing landed. macOS keeps its existing two-part send with the 0.5 s pause (untested).
+   Seeking a paused VLC without play was tried first and rejected: seeks were lost, landed late or froze playback ~10 s.
+6. *Player left running after the last track:* the final Finished branches (book online/offline, episode, episode
+   offline, podcast Home) now close the player with `quit_gracefully` (no macOS `pkill VLC`).
+
+**How it was verified:** `cargo build`/`test` (164 passed: 161 plus 3 new - next_status against a fake mpv control socket:
+paused in the first second, paused at 0:00 after starting, and a real position; mutation-checked: without the Waiting
+return both pause tests time out) and the CI clippy command are clean. Live against a throwaway fake server with its own
+config, runtime and mpv folders and VLC on its own port (51299), new build vs v0.11.9:
+- mpv: pause at ~6 s, jump to 0:00 (U), next chapter (P): new build moved to ~60 s still paused; v0.11.9 left the jump
+  pending and stayed at 0:00. Paused skips keep mpv paused with the flag unchanged.
+- VLC: pause, then p/u/P/U - new build ends playing with the flag and player bar saying so, at the right position each
+  time; v0.11.9 showed paused while playing and lost two of four seeks.
+- A 12-second book played to its end: new build closed mpv and VLC; v0.11.9 left mpv running until quit.
+
+**Not verified:** macOS (the VLC two-part send and its 0.5 s pause are unchanged and untested); podcast Home's Mark
+Finished while paused at 0:00 live (the moved check is the same code; podcast flows weren't in the fake server).
+
+**Open questions / handoff:** Not committed - waiting on Paul's go-ahead. A remaining VLC quirk, not changed: at exactly
+0:00 VLC reports no position, so the saved position isn't updated and a chapter jump from there is computed from the last
+known position. Remaining review findings 7-10 (per-frame costs, blocking sleep, long comments) are untouched.

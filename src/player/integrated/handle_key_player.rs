@@ -14,6 +14,15 @@ fn current_chapter_idx(chapters: &[Chapter], time: f64) -> Option<usize> {
     })
 }
 
+// A seek can leave the player playing (see Player::seek_resumes_playback) - the player bar
+// has to say so.
+fn note_seek_resumed_playback(player: &Player) {
+    if player.seek_resumes_playback()
+        && let Ok(Some(session)) = get_listening_session() {
+            let _ = update_is_playback("1", session.id_session.as_str());
+    }
+}
+
 pub fn handle_key_player(key: &str, player: &Player, username: &str) -> io::Result<()> {
     if !player.is_reachable() {
         return Err(io::Error::new(io::ErrorKind::NotConnected, "the player is not running"));
@@ -45,10 +54,12 @@ pub fn handle_key_player(key: &str, player: &Player, username: &str) -> io::Resu
         // jump forward
         "p" => {
             player.seek_relative(jump)?;
+            note_seek_resumed_playback(player);
         }
         // jump backward
         "u" => {
             player.seek_relative(-jump)?;
+            note_seek_resumed_playback(player);
         }
         // next chapter - resolved from Absotui's own chapters[] data (via pending_seek,
         // see update_pending_seek's doc comment) rather than VLC's native chapter_n,

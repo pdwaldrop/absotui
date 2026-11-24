@@ -37,6 +37,9 @@ pub struct Track {
 
 pub enum PlaybackStatus {
     Playing(u32),
+    // No position to report yet (still opening, or paused in its first second) - lets the
+    // playback loop handle chapter jumps, token refresh and Mark Finished meanwhile.
+    Waiting,
     Finished,
     Closed,
 }
@@ -47,11 +50,12 @@ pub struct PlayerSession {
     is_up: bool,
     has_track_started: bool,
     last_poll: Option<Instant>,
+    track_loaded_at: Instant,
 }
 
 impl PlayerSession {
     pub async fn launch(player: Player, username: String, track: Track) -> Self {
-        let mut session = Self { player, username, is_up: false, has_track_started: false, last_poll: None };
+        let mut session = Self { player, username, is_up: false, has_track_started: false, last_poll: None, track_loaded_at: Instant::now() };
         session.start_track(track).await;
         session
     }
@@ -64,20 +68,30 @@ impl PlayerSession {
         self.player.seek_absolute(seconds)
     }
 
+    pub fn seek_resumes_playback(&self) -> bool {
+        self.player.seek_resumes_playback()
+    }
+
     pub fn quit(&self) -> io::Result<()> {
         self.player.quit()
     }
 
-    // Waits out the loading phase: until the current track reports a real position, a
-    // missing one just means it's still opening - so it's never passed on as
-    // Playing(0), and "at end" only counts as Finished once the track has started.
+    pub fn quit_gracefully(&self) -> io::Result<()> {
+        self.player.quit_gracefully()
+    }
+
+    // Until the current track reports a real position, a missing one means it's still
+    // opening (or paused before its first second) - never passed on as Playing(0), and
+    // "at end" only counts as Finished once the track has started. Polled quickly while a
+    // track opens, and Waiting is returned about once a second so the caller isn't stuck.
     pub async fn next_status(&mut self) -> PlaybackStatus {
         if !self.is_up {
             return PlaybackStatus::Closed;
         }
         if let Some(last_poll) = self.last_poll {
-            sleep_until(last_poll + POLL_INTERVAL).await;
+            sleep_until(last_poll + self.poll_interval()).await;
         }
+        let wait_until = Instant::now() + POLL_INTERVAL;
         loop {
             let snapshot = self.player.poll();
             self.last_poll = Some(Instant::now());
@@ -91,8 +105,16 @@ impl PlayerSession {
                 self.has_track_started = true;
                 return PlaybackStatus::Playing(position);
             }
-            sleep(LOADING_POLL_INTERVAL).await;
+            if Instant::now() >= wait_until {
+                return PlaybackStatus::Waiting;
+            }
+            sleep(self.poll_interval()).await;
         }
+    }
+
+    fn poll_interval(&self) -> Duration {
+        let still_opening = !self.has_track_started && self.track_loaded_at.elapsed() < STARTUP_TIMEOUT;
+        if still_opening { LOADING_POLL_INTERVAL } else { POLL_INTERVAL }
     }
 
     // Whatever still holds the control port/socket (the previous track, or a player
@@ -103,6 +125,7 @@ impl PlayerSession {
 
         self.has_track_started = false;
         self.last_poll = None;
+        self.track_loaded_at = Instant::now();
         let player = self.player.clone();
         let username = self.username.clone();
         let process = tokio::spawn(async move {
@@ -146,8 +169,67 @@ impl PlayerSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
     use std::os::unix::process::ExitStatusExt;
+    use std::path::PathBuf;
     use std::process::ExitStatus;
+
+    // Answers mpv's IPC like a player sitting at `time_pos`.
+    fn fake_mpv(name: &str, time_pos: f64) -> PathBuf {
+        let socket = std::env::temp_dir().join(format!("absotui-fake-mpv-{}-{name}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&socket);
+        let listener = UnixListener::bind(&socket).unwrap();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut writer = stream.try_clone().unwrap();
+                for line in BufReader::new(stream).lines().map_while(Result::ok) {
+                    let reply = if line.contains("time-pos") {
+                        format!("{{\"data\":{time_pos},\"error\":\"success\"}}")
+                    } else {
+                        "{\"data\":false,\"error\":\"success\"}".to_string()
+                    };
+                    if writeln!(writer, "{reply}").is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+        socket
+    }
+
+    fn session_on(socket: PathBuf, has_track_started: bool) -> PlayerSession {
+        PlayerSession {
+            player: Player::Mpv { socket },
+            username: String::new(),
+            is_up: true,
+            has_track_started,
+            last_poll: None,
+            track_loaded_at: Instant::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_player_paused_in_its_first_second_reports_waiting_instead_of_hanging() {
+        let mut session = session_on(fake_mpv("paused-early", 0.4), false);
+        let status = tokio::time::timeout(Duration::from_secs(3), session.next_status()).await;
+        assert!(matches!(status, Ok(PlaybackStatus::Waiting)));
+    }
+
+    #[tokio::test]
+    async fn a_started_track_paused_at_zero_reports_waiting_too() {
+        let mut session = session_on(fake_mpv("paused-at-zero", 0.2), true);
+        let status = tokio::time::timeout(Duration::from_secs(3), session.next_status()).await;
+        assert!(matches!(status, Ok(PlaybackStatus::Waiting)));
+    }
+
+    #[tokio::test]
+    async fn a_real_position_is_reported_as_playing() {
+        let mut session = session_on(fake_mpv("playing", 42.7), false);
+        let status = tokio::time::timeout(Duration::from_secs(3), session.next_status()).await;
+        assert!(matches!(status, Ok(PlaybackStatus::Playing(42))));
+        assert!(session.has_track_started);
+    }
 
     fn output_with_stderr(stderr: &str) -> Output {
         Output { status: ExitStatus::from_raw(2 << 8), stdout: Vec::new(), stderr: stderr.as_bytes().to_vec() }
