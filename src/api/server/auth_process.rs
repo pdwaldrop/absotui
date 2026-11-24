@@ -97,12 +97,7 @@ pub async fn finish_login(username: &str, server_address: &str, access_token: &s
         )));
     }
 
-    // Token encryption before insert it in the database. A failure here (almost
-    // always a missing/unreadable ABSOTUI_SECRET_KEY) used to be logged and
-    // swallowed, leaving `token_encrypted` as an empty string that still got
-    // written to the users table - login looked successful, but the very next
-    // launch would 401 against that empty token with no indication why. Fail the
-    // login itself instead, so nothing unusable ever reaches the database.
+    // A failed encryption (usually a missing ABSOTUI_SECRET_KEY) fails the login, so no unusable token is saved.
     let token_encrypted = match encrypt_token(access_token) {
         Ok(encrypted_token) => {
             info!("Token successfully encrypted");

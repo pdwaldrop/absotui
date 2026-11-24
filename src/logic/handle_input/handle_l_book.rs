@@ -293,20 +293,8 @@ pub async fn handle_l_book(
             }
 }
 
-/// Plays a downloaded book with no server session at all - used when
-/// `post_start_playback_session_book` fails (server unreachable) but a local copy of
-/// the book exists (see src/utils/download_cache.rs). No `sync_session` /
-/// `update_media_progress` / `close_session` calls happen during playback, since there
-/// is no server-issued session id to attach them to - the local `listening_session`
-/// row is kept current for local resume, and a single best-effort progress push (its
-/// result ignored either way) happens when playback stops, in case connectivity
-/// returned by then. Deliberately doesn't retry or queue that push - a fuller
-/// offline-sync subsystem is out of scope for this first pass.
-///
-/// Sequences through `downloaded.tracks` exactly like the online loop above sequences
-/// through the server's `AudioTrack`s (same book-wide-time accounting, same
-/// pending_seek handling for chapter jumps) - a book downloaded as several per-chapter
-/// files plays and navigates the same offline as online, not just its first file.
+/// Plays a downloaded book with no server session (server unreachable): position is kept locally, with
+/// one best-effort progress push at the end. Walks multi-file downloads like the online loop.
 async fn handle_l_book_offline(
     id: String,
     downloaded: DownloadedItem,

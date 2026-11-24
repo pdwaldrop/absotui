@@ -24,13 +24,7 @@ pub fn player_box_height(show_key_bindings: bool) -> u16 {
 }
 
 pub fn render_player(area: Rect, buf: &mut ratatui::buffer::Buffer, player_info: Vec<String>, username: &str, footer_height: u16) {
-    // player_info() only pushes the full 12 fields this function indexes into on a
-    // successful `Ok(Some(session))` read (see src/player/integrated/player_info.rs) -
-    // a transient sqlite read error (Ok(None)/Err path, only 4 fields) shouldn't be
-    // able to happen anymore now that get_listening_session has a busy_timeout, but
-    // indexing a caller-supplied Vec without checking its length first is fragile
-    // regardless of how rare that's supposed to be - skip this frame instead of
-    // panicking the whole render loop.
+    // Fewer than 12 fields means the session read failed; skip this frame rather than panic.
     if player_info.len() < 12 {
         log::error!("render_player: player_info has {} fields, need 12 - skipping this frame", player_info.len());
         return;
@@ -39,21 +33,8 @@ pub fn render_player(area: Rect, buf: &mut ratatui::buffer::Buffer, player_info:
     let show_key_bindings = get_is_show_key_bindings(username) == "1";
     let block_height = player_box_height(show_key_bindings);
 
-    // This box's position is independent of the App's own layout (it's drawn via a
-    // separate code path in main.rs, not as part of `Widget for &mut App`) but has
-    // to land exactly on `standard_layout`'s reserved player-gap, which sits right
-    // after `main_area` (`Constraint::Fill(1)`, so it grows or shrinks to absorb
-    // whatever the footer doesn't need) and right before `refresh_area` (always 1
-    // row) and the footer itself. `footer_height` is that frame's *actual* value
-    // (`app.last_footer_height`, set by `standard_layout` when `app` was rendered a
-    // moment earlier in the same frame - see main.rs), not a guessed worst case: a
-    // fixed guess only tolerates the footer varying across a spread of 1 row, and
-    // once wrapped-footer spacing widened that spread to 3, a guessed constant was
-    // wrong for whichever end of the range it didn't happen to cover (confirmed
-    // live: the box's own top border/title vanished under the app's next frame at
-    // one end, and the box overlapped the footer at the other). Working back from
-    // the bottom: `footer_height` rows for the footer, 1 for `refresh_area`, then
-    // this box's own `block_height` rows, landing exactly where `main_area` ends.
+    // Drawn apart from the App's layout, so it works back from the bottom with this frame's real footer height
+    // (`last_footer_height`): footer, 1 refresh row, then this box - exactly where `main_area` ends.
     let new_y = area.y + area.height.saturating_sub(footer_height + 1 + block_height);
 
     let text_area = Rect::new(area.x, new_y, area.width, block_height);
@@ -113,12 +94,8 @@ pub fn render_player(area: Rect, buf: &mut ratatui::buffer::Buffer, player_info:
 
     paragraph.render(rest_area, buf);
 
-    // Title line: progress bar rendered as a background fill directly behind the text,
-    // rather than a separate bar, to avoid spending extra vertical space in an already
-    // compact player bar.
-    // Podcasts store "Episode Title | Podcast Title" directly as the title with an empty
-    // author/chapter (see handle_l_pod_home.rs/handle_l_pod.rs), so there's nothing to
-    // append here for them - books show "Chapter #. Name | Book" instead.
+    // Title line, with progress shown as a background fill. Podcast titles already read "Episode | Podcast";
+    // books get "Chapter | Book".
     let title_text = if player_info[1].is_empty() && player_info[2].is_empty() {
         player_info[0].clone()
     } else {

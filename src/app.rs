@@ -138,14 +138,7 @@ pub enum PodcastAddStage {
 // render path don't need to know which of the two calls actually ran.
 pub enum PodcastAddOutcome {
     Found(Vec<crate::api::podcasts::search_podcast::PodcastSearchResult>),
-    // A single Results row was picked and its real feed has been re-fetched to
-    // enrich it before landing on Confirm - see the `l`/Enter handler on
-    // PodcastAddStage::Results. iTunes' own search API never returns a podcast
-    // description at all (confirmed against its raw public API, not an
-    // Audiobookshelf or client-side gap), so Results rows always show "no
-    // description" - the podcast's actual RSS feed always has a real one, so this
-    // re-fetches it right when the user commits to a specific show, rather than
-    // for every row shown (which would mean one wasted feed fetch per result).
+    // The chosen show's feed was re-fetched for its description - iTunes search results never include one.
     ConfirmReady(Box<crate::api::podcasts::search_podcast::PodcastSearchResult>),
     // The create_podcast -> check_new_episodes pair (spawned from the Confirm stage)
     // finished successfully - carries how many episodes check_new_episodes actually
@@ -439,22 +432,8 @@ pub(crate) struct PodEpBatch {
     durations: Vec<Vec<String>>,
 }
 
-/// Fetches every podcast's full episode list, one request per podcast in
-/// `ids_library`, concurrently (capped at `MAX_CONCURRENT_REQUESTS`). Split out of
-/// `App::new()` (see bug_id 3f729c) so it can run as a background task instead of
-/// blocking the first render - it was ~5s of a ~7s startup on a 22-podcast library, and
-/// is only actually needed once the user opens a specific podcast from Library or
-/// searches episode titles/descriptions (`render_search_book` re-filters every render
-/// frame, so it picks up results the moment `poll_pod_ep_fetch` merges them in - no
-/// separate invalidation needed).
-///
-/// A single podcast's fetch failing does *not* abort the batch (unlike the old inline
-/// version, which used `?` and would fail the whole of `App::new()` over one podcast's
-/// transient error) - failures push an empty episode list for that podcast instead, so
-/// every returned `Vec` stays exactly as long as `ids_library` and index-aligned with
-/// it. A background task has no caller left to propagate a `Result` to by the time it
-/// would fail, so silently degrading one podcast to "no episodes yet" is the only
-/// option that doesn't panic downstream index lookups.
+/// Fetches every podcast's episode list in the background (concurrently, in request order). A failed
+/// podcast gets an empty list, so the result stays index-aligned with `ids_library`.
 async fn fetch_all_pod_ep(token: String, server_address: String, ids_library: Vec<String>) -> PodEpBatch {
     let mut batch = PodEpBatch {
         titles: Vec::with_capacity(ids_library.len()),
@@ -468,12 +447,8 @@ async fn fetch_all_pod_ep(token: String, server_address: String, ids_library: Ve
         durations: Vec::with_capacity(ids_library.len()),
     };
 
-    // Built up front as owned futures, not directly inside stream::iter(...map(closure)) -
-    // the latter makes rustc infer a too-narrow higher-ranked lifetime for the borrowed
-    // `token`/`server_address` here, which then fails to satisfy Send once this whole
-    // function is itself awaited inside another spawned task's async block (as it is in
-    // App::new()) even though nothing here actually holds a real borrow across an await
-    // point. Same fix as the equivalent fan-out in get_library_perso_view_pod.rs.
+    // Owned futures built up front: mapping inside stream::iter makes rustc infer a lifetime that breaks
+    // `Send` when this is awaited inside a spawned task.
     let mut episode_list_futures = Vec::with_capacity(ids_library.len());
     for id_library in &ids_library {
         let token = token.clone();
@@ -560,32 +535,11 @@ async fn fetch_podcast_home_data(token: &str, server_address: String, id_selecte
     Ok(data)
 }
 
-// If the actively-playing podcast episode isn't in the freshly-fetched "New &
-// Unfinished" list, pin it at the top instead of letting it silently vanish from view.
-// This happens for real: a freshly-autoplayed episode only joins the server's
-// "Continue Listening" shelf once this app's own periodic progress sync reaches it
-// (every ~10s of active polling), so there's a window where the episode that's
-// actually playing isn't in either server shelf `get_new_and_unfinished_pod` reads from
-// - during which a user who can't see it playing may reselect it, thinking it's
-// unplayed, which used to restart the same session.
-//
-// Deliberately NOT a network fetch for full metadata: this runs at the end of the
-// periodic refresh (`refresh_podcast_home_if_stale`), so a network call here would hold
-// up every refresh - and it would fire almost every time right after an autoplay
-// transition, exactly when this same propagation delay is in effect. Instead this reuses what's already
-// sitting in the local session row: `title` is stored as "Episode Title | Podcast
-// Title" (see the `insert_listening_session` call sites), split back apart here rather
-// than re-fetched. Subtitle/author/description/season/episode-number are left blank for
-// this pinned row - they only matter if the user selects it, and self-correct as soon
-// as the server's shelves catch up and a normal fetch picks the episode up with full
-// data.
+// Keeps the playing episode visible when it isn't in the fetched list yet (an autoplayed episode only joins
+// the server's shelves after its first progress sync), from the local session row rather than a fetch.
+// Its title is stored as "Episode | Podcast"; the other fields stay blank until a normal fetch finds it.
 fn pin_now_playing_episode(data: &mut PodcastHomeData, username: &str) {
-    // The listening_session row lingers indefinitely after playback ends - nothing
-    // clears it, it's only ever replaced by the next `insert_listening_session` call -
-    // so a non-empty id_pod alone doesn't mean anything is actually still playing. Gate
-    // on is_vlc_running too, or every fresh launch/refresh would pin whichever podcast
-    // episode was last listened to, ever, even if that was days ago - a phantom "now
-    // playing" row that pushes everything else down a line for nothing.
+    // The session row outlives playback, so only pin it while something is actually playing.
     if get_is_vlc_running(username) != "1" {
         return;
     }
@@ -617,36 +571,13 @@ fn pin_now_playing_episode(data: &mut PodcastHomeData, username: &str) {
     data.embedded_cover_ino.insert(0, None);
 }
 
-// `Picker::from_query_stdio()` asks the terminal what image protocol it supports by
-// writing an escape sequence and waiting on the response - measured live at ~2s, by
-// far the single largest cost in `App::new()` (bigger than every network round-trip
-// combined). That capability can't change mid-session (same terminal, same protocol
-// support for as long as this process runs), but `App::new()` itself re-runs on every
-// `R` refresh and every library switch - querying fresh every time paid that ~2s
-// repeatedly for a value that was already known. Queried once per process and
-// cloned (`Picker` is cheap - just a handful of enum/small values) on every
-// subsequent call instead.
+// The terminal's image protocol can't change mid-session and asking costs ~2 s, so ask once per process.
 static IMAGE_PICKER: std::sync::OnceLock<Option<ratatui_image::picker::Picker>> = std::sync::OnceLock::new();
 
-// Same reasoning as IMAGE_PICKER just above: `check_update()` hits GitHub's API for
-// the latest release tag, and whether this install is out of date can't change
-// during the process's own lifetime - restarting is already how every other
-// version-pinned check in this codebase (e.g. IMAGE_PICKER) expects to pick up a
-// change. Re-querying GitHub on every `R` refresh and library switch was pure
-// waste, and at high enough refresh frequency could exhaust GitHub's unauthenticated
-// rate limit (60 requests/hour per IP) for no benefit - once that happens
-// `check_update` degrades silently (its own Err branch just logs and returns None),
-// so a heavy `R` user could lose update notifications entirely without any
-// indication why. Cached the same way: computed once per process, cloned after.
+// Same for the update check: once per process, so `R` and library switches don't hit GitHub's rate limit.
 static UPDATE_CHECK: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
 
-// The Settings menu's entries, named once so the many places that need to know
-// "which row is X" (the l/→ dispatch below, and the About-specific rendering in
-// tui.rs) can look it up by name via `App::settings_index` instead of a raw
-// position - a previous version of this list matched on hardcoded indices like
-// `Some(4)` scattered across two files, which silently went stale (pointed at the
-// wrong entry, or - for the one nobody happened to touch - simply never noticed)
-// the moment anyone reordered `SETTINGS_ENTRIES` without hunting down every one.
+// Settings entries by name; look them up with `App::settings_index`, never by position.
 pub(crate) const SETTINGS_LIBRARY: &str = "Library";
 pub(crate) const SETTINGS_PER_ITEM_SPEED: &str = "Per-Item Speed";
 pub(crate) const SETTINGS_PODCAST_AUTOPLAY: &str = "Podcast Autoplay";
@@ -849,12 +780,7 @@ impl App {
         // ~1 hour) makes this fail with a 401 before `refresh_token_if_needed` ever
         // gets a chance to run (that only fires once an `App` already exists).
         if maybe_refresh_token(&mut token, &mut refresh_token, &username, &server_address).await == RefreshOutcome::Failed {
-            // Refresh token itself is dead (30 days idle, or server-revoked) - same
-            // handling as refresh_token_if_needed's mid-session case (see below):
-            // delete the account and fail clearly here instead of proceeding to the
-            // API call below with a token guaranteed to 401, which would otherwise
-            // surface as a cryptic "reached the server, but HTTP 401" error with no
-            // indication that a fresh login (not a retry) is what's actually needed.
+            // The refresh token is dead: delete the account and say so, instead of a confusing 401 below.
             let _ = delete_user(&username);
             let _ = update_login_err("Your session expired - restart Absotui to log in again");
             return Err(Report::new(std::io::Error::other("Your session expired - restart Absotui to log in again")));
@@ -916,15 +842,7 @@ impl App {
     let mut book_progress_cnt_list: Vec<Vec<String>> = Vec::new();
     let mut book_progress_cnt_list_cur_time: Vec<Vec<f64>> = Vec::new();
 
-    // The Home data (Continue Listening / New & Unfinished), the full library listing,
-    // and the update check are three independent round-trips that only ever needed
-    // `id_selected_lib` - running them one after another just added their latencies
-    // together (measured ~1.8s + ~2.4s + ~0.5s of an 8.4s startup). Driven concurrently
-    // here so startup costs about the slowest of the three instead of their sum.
-    //
-    // `tokio::join!` rather than building the futures and awaiting them later: Rust
-    // futures are lazy, so a future that isn't being polled isn't running, and awaiting
-    // them in sequence would be exactly as slow as the original code.
+    // Independent requests, run together so startup waits for the slowest rather than their sum.
     let home_fut = async {
     if is_podcast {
         let data = fetch_podcast_home_data(&token, server_address.clone(), &id_selected_lib, podcast_sort_newest_first, &username).await?;
@@ -1056,15 +974,8 @@ impl App {
     // appear this session, not a hard startup failure like `all_books` above.
     let all_collections = collections_res.unwrap_or_default();
 
-    // Settings > Auto Download: keep the local download set mirroring Continue
-    // Listening (books) or New & Unfinished (podcasts). Hooked in here rather than a
-    // separate periodic task since `R` and every library switch already fully
-    // reconstruct `App` via this same function - see the CLAUDE.md note on App::new()
-    // being the one place cross-cutting state gets refreshed. Podcasts get a second
-    // hook in refresh_podcast_home_if_stale, since that list can change every few
-    // seconds on its own (new episode arrives, one finishes and drops out) without a
-    // full App::new() - books don't need that, Continue Listening only changes on the
-    // refreshes already covered here.
+    // Auto Download syncs on every App::new (startup, R, library switch); podcasts also re-sync on each
+    // periodic Home refresh, since that list changes on its own.
     if get_is_auto_download(&username) == "1" {
         if is_podcast {
             sync_auto_downloads_podcasts(username.clone(), token.clone(), server_address.clone(), _ids_cnt_list.clone(), ids_ep_cnt_list.clone(), _titles_cnt_list.clone(), titles_pod_cnt_list.clone());
@@ -1151,13 +1062,8 @@ impl App {
     let titles_pod: Vec<String> = Vec::new();
     let durations_pod_ep: Vec<String> = Vec::new();
 
-    // Every podcast's full episode list (the `all_*_pod_ep` arrays) is fetched in the
-    // background rather than here - see `fetch_all_pod_ep`'s doc comment for why (bug_id
-    // 3f729c: this was ~5s of a ~7s startup on a 22-podcast library). `poll_pod_ep_fetch`
-    // merges the result into `self` once it arrives, called every render-loop iteration
-    // from main.rs the same way `poll_update_uninstall_event` already is. Until then the
-    // arrays are simply empty - `render_search_book` and the Library->PodcastEpisode
-    // transition both already guard against an index not being populated yet.
+    // Episode lists load in the background (see fetch_all_pod_ep) and are merged by poll_pod_ep_fetch;
+    // until then the arrays are empty and their readers cope.
     let pod_ep_receiver = if is_podcast {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let token = token.clone();
@@ -1396,20 +1302,8 @@ impl App {
     })
     }
 
-    // Re-fetches just the podcast "New & Unfinished" list if it's gotten stale, without
-    // touching cursor position/selection or anything else - so an episode that just
-    // finished (or a newly-published one) shows up without needing a manual refresh,
-    // and without disrupting whatever the user is doing in the list.
-    /// Called every main-loop tick (see main.rs) - proactively renews the access token
-    /// well before Audiobookshelf's ~1 hour default expiry, and updates it in place so
-    /// every subsequent call this same running `App` makes uses the fresh value right
-    /// away, without waiting for a full `App::new()` reinit. A no-op whenever there's
-    /// no refresh token to use (see `maybe_refresh_token`'s doc comment).
-    ///
-    /// A long-running playback session doesn't go through this `App` at all (it's a
-    /// detached task talking only to sqlite - see CLAUDE.md's "one owner" note), so it
-    /// carries out this exact same check independently every poll tick - see
-    /// `handle_l_book`/`handle_l_pod`/`handle_l_pod_home`.
+    /// Renews the access token before it expires (called every main-loop tick) and updates it in place.
+    /// Playback tasks keep their own copy fresh the same way (see `maybe_refresh_token`).
     pub async fn refresh_token_if_needed(&mut self) {
         let Some(mut token) = self.token.clone() else { return; };
         let Some(mut refresh_token) = self.refresh_token.clone() else { return; };
@@ -1625,12 +1519,8 @@ pub fn handle_key(&mut self, key: KeyEvent) {
         return;
     }
 
-    // The Confirm/Password/Running/Failed stages of Settings > Update/Uninstall
-    // own every key themselves (most importantly so free-text password typing can't
-    // be swallowed by the global single-letter bindings below, eg. player controls) -
-    // handle them here and return early. Only the passive `Instructions` stage (just
-    // a 2-item list + Enter, like every other Settings sub-screen) falls through to
-    // the normal dispatch further down.
+    // These Update/Uninstall stages own every key (so typing a password can't trigger global bindings);
+    // only the Instructions stage falls through to the normal dispatch.
     if matches!(self.view_state, AppView::SettingsUpdateUninstall) {
         match &self.update_uninstall_stage {
             UpdateUninstallStage::Confirm(action) => {
@@ -1707,12 +1597,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
         }
     }
 
-    // Podcast subscription add flow (`A` on Library, podcast mode) owns every key
-    // itself while active, same reasoning as the blocks above - Input is checked
-    // here (like the `/` search overlay's is_search_active) before view_state has
-    // even changed to PodcastAdd yet; Loading/Results/Confirm all run with
-    // view_state already PodcastAdd, so the big match below never sees this view
-    // (see its own no-op arm).
+    // The podcast-add flow owns every key while active; Input is caught here, before view_state changes.
     if let Some(stage) = self.podcast_add_stage.take() {
         match stage {
             PodcastAddStage::Input => {
@@ -2029,12 +1914,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
             }
         }
 
-        // toggle newest/oldest-first sort order for the podcast New & Unfinished list.
-        // Re-sorts immediately using data already in memory - no need to re-fetch.
-        // Gated on Home like `d`/`F` right below it - this reorders _cnt_list state that
-        // only Home renders, so without the view check it silently reordered/reselected
-        // that state from any screen whenever podcast mode was on (only advertised on
-        // Home's footer, but was actually live everywhere).
+        // Toggle newest/oldest-first for New & Unfinished, re-sorting in memory. Home only: it reorders Home's lists.
         KeyCode::Char('D') if self.is_podcast && matches!(self.view_state, AppView::Home) => {
             self.podcast_sort_newest_first = !self.podcast_sort_newest_first;
 
@@ -2144,12 +2024,8 @@ pub fn handle_key(&mut self, key: KeyEvent) {
             }
         }
 
-        // Marks the selected podcast episode as finished server-side and removes it
-        // from the New & Unfinished list immediately, rather than waiting on the next
-        // periodic refresh to notice the server no longer considers it unfinished.
-        // Reuses reorder_podcast_lists (built for resorting, not removal) by permuting
-        // to every index except the removed one - same effect on all 13 parallel
-        // arrays, no separate per-array removal logic needed.
+        // Mark the selected episode finished and drop it from the list now; reorder_podcast_lists keeps every
+        // parallel array aligned.
         KeyCode::Char('F') if self.is_podcast && matches!(self.view_state, AppView::Home) => {
             if let Some(selected) = self.list_state_cnt_list.selected()
                 && let Some(id_pod) = self._ids_cnt_list.get(selected).cloned()
@@ -2158,14 +2034,8 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                     let token = self.token.clone();
                     let server_address = self.server_address.clone();
 
-                    // If this episode is the one actively playing, the live playback
-                    // task (handle_l_pod_home) owns its progress syncing - every ~10s
-                    // it PATCHes progress/currentTime with no isFinished field at all,
-                    // which would silently revert the isFinished=true set below the
-                    // moment it next runs (the list item would vanish then reappear).
-                    // Flip listening_session.is_finished instead and let that task
-                    // notice it (polled every ~1s) and stop playback + mark finished
-                    // itself exactly once, with nothing left to race it.
+                    // The playing episode's task syncs progress without isFinished and would undo it, so flag the session
+                    // instead and let that task stop playback and mark it finished.
                     let currently_playing_session = if get_is_vlc_running(self.username.as_str()) == "1" {
                         match get_listening_session() {
                             Ok(Some(session)) if session.id_pod == ep_id => Some(session),
@@ -2301,14 +2171,8 @@ pub fn handle_key(&mut self, key: KeyEvent) {
             }
         }
         KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
-            // If the chapter list is expanded under the currently-playing book, the
-            // cursor may be sitting on a chapter row rather than a book row - request a
-            // jump to that chapter's start instead of restarting playback entirely.
-            // Routed through pending_seek rather than seeking the running VLC directly:
-            // for a book split across several files, the target chapter may live in a
-            // different file than whatever's currently loaded, and only the playback
-            // loop that owns that VLC process (handle_l_book) knows which - see
-            // update_pending_seek's doc comment.
+            // On a chapter row of the playing book, jump to it via pending_seek: only the playback loop knows which
+            // file holds that chapter.
             if matches!(self.view_state, AppView::Home) && !self.is_podcast
                 && let Some(selected) = self.list_state_cnt_list.selected()
                 && let Some(HomeRow::Chapter { chapter, .. }) = self.build_home_rows().get(selected)
@@ -2369,13 +2233,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                 if let Some(index) = selected_search_book {
                     // ids_library_pod_search holds the podcast id here, not the episode id.
                     if let Some(_id_pod) = self.ids_library_pod_search.get(index) {
-                        // `.get` rather than `[index]`: `ids_library_pod_search` doesn't
-                        // depend on the background pod_ep fetch (bug_id 3f729c) but
-                        // `all_ids_pod_ep_search` does - it's filtered from
-                        // `all_ids_pod_ep`, which can legitimately be shorter (even
-                        // empty) than the search results list while that fetch is still
-                        // in flight. Same "nothing meaningful to set yet" reasoning as
-                        // the non-search version above.
+                        // `.get`: the search episode lists come from the background fetch and may not be filled yet.
                         if let Some(ids) = self.all_ids_pod_ep_search.get(index) {
                             self.ids_pod_ep_search = ids.clone();
                         }
@@ -2538,12 +2396,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                 AppView::Library => {
                     if self.is_podcast {
                         if let Some(index) = selected_library {
-                            // The background fetch this depends on (bug_id 3f729c,
-                            // poll_pod_ep_fetch) is usually done well before a user
-                            // reaches here - Home renders in ~2s, and reaching Library
-                            // and picking a podcast takes at least that long by hand -
-                            // but on the rare chance it isn't yet, stay on this screen
-                            // and say so rather than opening an empty episode list.
+                            // The background episode fetch may still be running: stay here and say so rather than open an empty list.
                             if index >= self.all_ids_pod_ep.len() {
                                 let mut stdout = stdout();
                                 let _ = pop_message(&mut stdout, 2, "Still loading episode lists, try again in a moment...");
@@ -3166,14 +3019,7 @@ pub fn select_last(&mut self) {
     }
 }
 
-// Whether some part of the app currently owns free-text keyboard input - the `/`
-// search box, the podcast-add Input stage, or Update/Uninstall's password prompt.
-// main.rs's own top-level `R` (refresh) handling runs completely independently of
-// `handle_key` (it checks the same raw KeyEvent again afterward, regardless of what
-// handle_key already did with it) - without this guard, typing a capital R into any
-// of these free-text fields triggers a full app reload mid-keystroke, discarding
-// whatever was being typed. Real, pre-existing gap for search/password too, not
-// just the podcast-add flow that surfaced it.
+// Whether free text is being typed (search, podcast add, password) - main.rs's `R` reload skips then.
 pub fn is_capturing_free_text(&self) -> bool {
     self.is_search_active
         || matches!(self.podcast_add_stage, Some(PodcastAddStage::Input))

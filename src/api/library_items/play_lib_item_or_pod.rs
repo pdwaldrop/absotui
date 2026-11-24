@@ -19,12 +19,8 @@ pub struct AudioTrack {
     pub content_url: String,
     pub duration: f64,
     pub start_offset: f64,
-    /// This track's position within the session's own `audioTracks[]` - needed (not
-    /// just `content_url`) to build the `/public/session/:id/track/:index` URL VLC
-    /// actually streams from. See `post_start_playback_session_book`'s doc comment.
-    /// Missing or null (older items, per Audiobookshelf's own pre-v2.21.0 caveat -
-    /// see `post_start_playback_session_pod`'s identical tolerance) falls back to 0
-    /// rather than failing this track's whole containing array to deserialize.
+    /// Index in the session's `audioTracks[]`, needed for the `/public/session/:id/track/:index` stream URL.
+    /// Missing or null on items from before Audiobookshelf 2.21 - falls back to 0.
     #[serde(default, deserialize_with = "index_or_default")]
     pub index: i64,
 }

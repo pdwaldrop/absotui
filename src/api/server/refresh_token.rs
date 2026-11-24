@@ -101,16 +101,9 @@ pub fn clock_skew_note() -> Option<String> {
     describe_clock_skew(CLOCK_OFFSET_SECS.load(Ordering::Relaxed))
 }
 
-/// Exchanges a refresh token for a new (access token, refresh token) pair via
-/// Audiobookshelf's `POST /auth/refresh`. The refresh token **rotates on every use**
-/// (confirmed against the server's own `TokenManager.js`/`Auth.js`) - the old value
-/// only remains valid for a short grace period - so callers must persist the returned
-/// refresh token, not just the access token.
-/// Distinguishes "the server was reached and explicitly rejected the refresh token"
-/// from any other failure (network unreachable, timeout, malformed response, a
-/// proxy's 5xx/429) - only this one means the refresh token itself is actually dead. `maybe_refresh_token`
-/// downcasts to this to decide between `RefreshOutcome::Failed` (delete-the-account
-/// worthy) and `RefreshOutcome::TransientError` (try again next tick).
+/// The server explicitly rejected the refresh token - the only failure meaning it's dead
+/// (`RefreshOutcome::Failed`); anything else is `TransientError`. Refresh tokens rotate on every use, so
+/// callers must store the returned one too.
 #[derive(Debug)]
 struct RefreshRejected(reqwest::StatusCode);
 
@@ -194,16 +187,9 @@ pub enum RefreshOutcome {
     TransientError,
 }
 
-/// Checked once per loop tick by both the main render loop (`App::refresh_token_if_needed`)
-/// and every long-running playback task (`handle_l_book`/`handle_l_pod`/`handle_l_pod_home`) -
-/// each holds its own copy of the token (see CLAUDE.md's "one owner" note on why the
-/// playback task never reaches into the live `App`), so each independently keeps its own
-/// copy fresh rather than relying on the other to have refreshed it.
-///
-/// Placed at the top of a loop body, before that iteration's own API calls, this also
-/// doubles as the reactive backstop for a token that went stale while nothing was
-/// ticking (eg. the OS suspended mid-playback) - the very next tick catches it before
-/// any call that iteration would otherwise fail with a 401.
+/// Renews the token when it's near expiry. Called at the top of each loop tick by the main loop and by
+/// every playback task (each holds its own copy), so a token that went stale during sleep is renewed
+/// before that tick's own requests.
 pub async fn maybe_refresh_token(
     token: &mut String,
     refresh_token: &mut String,

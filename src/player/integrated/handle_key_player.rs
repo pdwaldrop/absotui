@@ -120,13 +120,7 @@ pub fn handle_key_player(key: &str, player: &Player, username: &str) -> io::Resu
     Ok(())
 }
 
-// Adjusts and returns the effective speed rate: per-item (keyed by the active
-// session's id_item) if Settings > Per-Item Speed is on, otherwise the single shared
-// speed_rate - same resolution Player::start uses when launching a new session. Seeds the
-// item's row at a fixed 1.0x baseline on first touch (not the current global rate -
-// see update_is_per_item_speed/resolve_speed_rate), whether that's because this is the
-// item's first playback under per-item mode, or because per-item mode was just turned
-// on mid-session for an item that hasn't been touched yet.
+// Adjusts the speed in effect (per-item if that setting is on, seeded at 1.0x on first touch) and returns it.
 fn adjust_speed_rate(username: &str, is_up: bool) -> String {
     if get_is_per_item_speed(username) == "1"
         && let Ok(Some(session)) = get_listening_session() {

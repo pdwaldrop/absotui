@@ -5,21 +5,9 @@ use crate::api::podcasts::get_podcast_feed::get_podcast_feed;
 use crate::api::podcasts::download_episodes::download_episodes;
 use crate::app::PodcastAddOutcome;
 
-/// The actual work behind confirming a podcast add: resolves the target library's
-/// first folder (Audiobookshelf needs an explicit folder + on-disk path per item,
-/// same as the official web client's own "New Podcast" dialog computes), creates
-/// the subscription, then seeds it with `episode_count` episodes.
-///
-/// Seeding goes through `get_podcast_feed` + `download_episodes`, not
-/// `check_new_episodes`/`checknew` - confirmed live that checknew doesn't work for
-/// this: Audiobookshelf's own `Podcast.createFromRequest` stamps a freshly-created
-/// podcast's `lastEpisodeCheck` to the creation instant (not null/epoch-0 as its
-/// name might suggest), and checknew only considers episodes published *after*
-/// that timestamp - so a checknew call made immediately after creating one always
-/// finds zero episodes, since every episode in any real feed necessarily predates
-/// "right now". `download_episodes` takes raw feed-episode objects directly with
-/// no date filtering at all, which is what the official web client's own episode
-/// list uses to queue a specific episode's download regardless of age.
+/// Confirming a podcast add: resolve the library's first folder (needed for the item's path), create the
+/// subscription, then queue `episode_count` episodes via the feed and `download_episodes` (`checknew`
+/// finds nothing on a just-created podcast).
 pub async fn create_and_seed_podcast(chosen: PodcastSearchResult, episode_count: u32, library_id: String, token: String, server_address: String) -> PodcastAddOutcome {
     let libraries = match get_all_libraries(&token, server_address.clone()).await {
         Ok(root) => root.libraries,

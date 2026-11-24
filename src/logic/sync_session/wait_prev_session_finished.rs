@@ -27,19 +27,8 @@ pub fn owns_playback() -> bool {
     PLAYBACK_TASKS.load(Ordering::SeqCst) > 0
 }
 
-// Blocks until the previously-running playback task (if any) has finished its own
-// close/sync and released the playback slot, so a new track can't start while the old
-// one is still tearing down. Returns the claimed slot, to hold while playing - `None`
-// means the caller must NOT proceed to start a track (see below).
-//
-// Callers deliberately do NOT follow this with a defensive close of whatever's left in
-// `listening_session`. Every normal exit path (Q, natural end-of-track, VLC-quit
-// detection) closes its own session before returning, so the only way that row can be
-// stale-and-never-closed is an abnormal exit (crash/kill) - and `main.rs` now closes
-// that case once at startup instead. Running it here as well closed the session twice
-// on every track switch (confirmed live 2026-07-28: once from the previous track's own
-// quit-detection loop, once from the caller) - the concrete root cause behind bug_id
-// dd9a649.
+// Waits until the previous playback task has closed its session and released the slot, so tracks can't
+// overlap. Returns the slot to hold while playing; `None` means don't start.
 pub async fn wait_prev_session_finished(username: String) -> Option<PlaybackTask> {
 
     let message = "Syncing your last listening session. Please wait...";
@@ -50,26 +39,8 @@ pub async fn wait_prev_session_finished(username: String) -> Option<PlaybackTask
         let was_first_launch = is_vlc_first_launch == "1";
 
         if !was_first_launch {
-            // Loops trying to atomically claim the slot (flip is_loop_break 1->0)
-            // instead of a separate check-then-set - two "l" presses close enough
-            // together could otherwise both observe is_loop_break=="1" before either
-            // wrote "0", and both proceed to start a VLC session at once. Once this
-            // call succeeds, is_loop_break is already "0" - no separate update needed.
-            //
-            // Bounded to ~20s (same cap `quit_app` already uses in
-            // sync_session_from_database.rs for the symmetric "wait for the other
-            // task's cleanup" problem) rather than looping forever. A legitimate wait
-            // here is short: the caller's own player.quit() just killed the
-            // previous track's player process, so that track's own poll loop should
-            // notice the death and release the slot within a few seconds. If nothing
-            // has released it after 20s, there's no teardown to wait for at all -
-            // this attempt lost a claim race against another overlapping
-            // playback-start (e.g. the play key double-tapped inside the same
-            // second) whose session already started and won't naturally end for a
-            // long time. Give up instead of forcing the claim: forcing it would let
-            // this attempt start a second VLC process/session alongside the one that
-            // legitimately won the race (confirmed live: this loop was still
-            // spinning after 40+ seconds with is_loop_break stuck at "0").
+            // Atomic claim, retried for up to ~20 s while the previous task tears down. Still taken after that means
+            // another start won a race and is playing - give up rather than start a second player.
             let mut claimed = false;
             for _ in 0..20 {
                 if try_claim_playback_slot(&username) {
@@ -101,12 +72,7 @@ pub async fn wait_prev_session_finished(username: String) -> Option<PlaybackTask
 
         let _ = clear_message(&mut stdout, 3);
 
-        // This function runs inside a detached `tokio::spawn`ed playback task with
-        // no `Terminal` in scope to call `.clear()` on directly - see
-        // NEEDS_TERMINAL_CLEAR's doc comment. Set unconditionally (not just on the
-        // branch that actually popped a message) since the caller's own subsequent
-        // `pop_message` call (see handle_l_pod_home.rs and friends) can suffer the
-        // same stale-cache fate regardless of which branch ran here.
+        // Repaint fully: this runs in a spawned task that printed to the terminal directly.
         NEEDS_TERMINAL_CLEAR.store(true, Ordering::Relaxed);
 
         Some(PlaybackTask::start())

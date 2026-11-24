@@ -122,14 +122,7 @@ async fn main() -> Result<()> {
             });
         }
 
-        // Absotui has no window of its own - the terminal's title is whatever the
-        // running program sets it to (or just "absotui", the binary name, if nothing
-        // sets it). Keeping it in sync with what's actually playing makes the window
-        // identifiable from a taskbar/dock without opening it. An empty title (rather
-        // than repeating "Absotui") when idle avoids duplicating the app name a
-        // taskbar/dock already shows next to it from the .desktop file's Name= - most
-        // (this was confirmed empirically against DMS/quickshell) fall back to just
-        // that name when the window title itself is blank.
+        // The window title follows what's playing; empty when idle, so taskbars fall back to the app name.
         let mut last_window_title: Option<String> = None;
 
         // Created only now: the recovery screen (init_app_with_retry) reads the terminal
@@ -151,15 +144,8 @@ async fn main() -> Result<()> {
                 last_window_title = Some(window_title);
             }
 
-            // A detached playback task (wait_prev_session_finished and the
-            // handle_l_* session starters) may have popped/cleared a raw stdout status
-            // message with no `Terminal` in scope to reconcile ratatui's diff cache
-            // itself - see NEEDS_TERMINAL_CLEAR's doc comment. Checked here, right
-            // before `terminal.draw`, rather than after it, so the physical clear (a
-            // real blank-the-screen write) is immediately followed by the full
-            // repaint it forces, with no event-poll/sleep gap between them - doing
-            // it after `draw` left the screen visibly blank for up to ~250ms on every
-            // playback start (confirmed live: a full-screen flash on every "l"/Enter).
+            // A playback task may have printed straight to the terminal: repaint fully right before drawing, so the
+            // screen is never left blank between the clear and the draw.
             if NEEDS_TERMINAL_CLEAR.swap(false, Ordering::Relaxed) {
                 clear_screen(&mut terminal);
             }
@@ -271,21 +257,8 @@ async fn main() -> Result<()> {
                 match next {
                     Some(Ok(event::Event::Key(key))) => {
                         app.handle_key(key);
-                        // 'R' just arms the same library_needs_reload flag a Settings >
-                        // Library switch (or a podcast add/remove finishing - see
-                        // poll_podcast_add_result/poll_podcast_remove_result) already uses,
-                        // rather than reinit-ing inline here - the unconditional check below
-                        // is what actually reloads, since it runs every tick regardless of
-                        // whether a key was just pressed. Reloads triggered from a background
-                        // poll (podcast add/remove) resolve between keystrokes, not on one -
-                        // gating the reload on "a key was just pressed" left them sitting
-                        // there, reload pending, until the user happened to press anything.
-                        //
-                        // Gated on is_capturing_free_text: this check runs on the same raw
-                        // KeyEvent regardless of what handle_key already did with it, so
-                        // without this guard, typing a capital R while free-typing (search,
-                        // podcast-add, an update/uninstall password) would trigger a full
-                        // reload mid-keystroke, discarding whatever was being typed.
+                        // `R` only arms the reload; the check below runs every iteration so reloads from background results
+                        // happen without a keypress. Skipped while typing free text, where `R` is just a letter.
                         if let KeyCode::Char('R') = key.code
                             && !app.is_capturing_free_text() {
                             app.library_needs_reload = true;
@@ -303,12 +276,8 @@ async fn main() -> Result<()> {
                 let mut stdout = stdout();
                 let _ = clear_message(&mut stdout, 3);
                 let _ = pop_message(&mut stdout, 3, "Refreshing...");
-                // Reinitialize app to refresh - a working `app` already exists, so on
-                // failure the recovery screen offers a way to cancel back to it instead
-                // of forcing a fix-or-quit loop.
-                //
-                // The recovery screen reads the terminal directly, so the event stream (which
-                // has its own reader thread) is dropped for the duration and rebuilt after.
+                // Reload; on failure the recovery screen can cancel back to the current app. It reads the terminal
+                // itself, so the event stream is dropped meanwhile.
                 drop(events);
                 let reloaded = init_app_with_retry(&mut terminal, true).await;
                 events = EventStream::new();
@@ -320,14 +289,7 @@ async fn main() -> Result<()> {
                     app.library_needs_reload = false;
                 }
                 let _ = clear_message(&mut stdout, 3);
-                // pop_message/clear_message write straight to `stdout`, bypassing this
-                // `terminal`'s diff cache the same way search's separate Terminal
-                // instance does (see the '/' comment above) - without this, the next
-                // draw can decide a cell already matches its stale cache and skip
-                // repainting it, even though clear_message just blanked it for real
-                // (confirmed live: the player box's bottom border row sits exactly 3
-                // rows from the bottom, right where this message prints, and silently
-                // disappeared until something else forced a full repaint).
+                // The status message bypassed ratatui's diff cache, so repaint everything.
                 clear_screen(&mut terminal);
             }
 
@@ -348,14 +310,7 @@ fn clear_screen(terminal: &mut ratatui::DefaultTerminal) {
     terminal.swap_buffers();
 }
 
-// Waits for a just-submitted login attempt's spawned auth_process call (see
-// auth_input.rs::auth) to actually finish, instead of guessing a fixed delay before
-// re-checking whether the database now has credentials. Guessing too short (this used
-// to be a flat 1s sleep) meant a slow-but-successful login could still look like a
-// failure and force re-entering credentials a second time, even though the first
-// attempt was about to succeed. Capped at 30s so a hung request can't wedge the login
-// loop forever - past that, the normal "still empty, show the login screen again"
-// path takes over exactly like it always has for a genuine failure.
+// Waits for the submitted login to finish (up to 30 s) instead of guessing a delay.
 async fn wait_for_auth_to_finish() {
     for _ in 0..300 {
         if get_auth_in_progress() != "1" {

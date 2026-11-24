@@ -330,12 +330,8 @@ pub fn update_item_speed_rate(username: &str, id_item: &str, is_speed_rate_up: b
     Ok(())
 }
 
-// insert (or overwrite) a downloaded book or podcast episode's local file location(s) and
-// offline-playback metadata for (username, id_item). `kind` is "book" or "podcast".
-// `tracks_json`/`chapters_json` are pre-serialized (see DownloadedTrack/AudioTrack) -
-// empty string for either is fine (a podcast episode has no chapters; `get_download`
-// falls back to synthesizing a single track from `file_path`/`duration` when
-// `tracks_json` is empty, so already-downloaded single-file books need no re-download).
+// Insert or overwrite a download's local file(s) and offline metadata. `kind` is "book" or "podcast";
+// an empty `tracks_json` means one file at `file_path` (see `get_download`).
 #[allow(clippy::too_many_arguments)]
 pub fn insert_download(username: &str, id_item: &str, file_path: &str, duration: &str, title: &str, author: &str, kind: &str, tracks_json: &str, chapters_json: &str, is_auto: bool) -> Result<()> {
 
@@ -749,15 +745,8 @@ pub fn update_is_loop_break(value: &str, username: &str) -> Result<()> {
     Ok(())
 }
 
-// Atomically claims the "no other session is starting/running" slot for `username` by
-// flipping is_loop_break from "1" to "0" in a single UPDATE...WHERE, returning whether
-// this call was the one that flipped it. Unlike a separate get_is_loop_break() read
-// followed by a later update_is_loop_break("0", ...) write (what wait_prev_session_finished
-// used to do), this can't race: two concurrent callers issuing the same UPDATE can't both
-// get rows_affected()==1, since sqlite serializes writes to the same row - closes the
-// window that let two "l" presses close enough together both pass the old check-then-set
-// and start two VLC sessions at once (the second's insert_listening_session write would
-// then clobber the first's singleton listening_session row).
+// Atomically claims the playback slot (is_loop_break "1" -> "0" in one UPDATE); true if this call took
+// it, so two quick play presses can't both start a session.
 pub fn try_claim_playback_slot(username: &str) -> bool {
     let db_path = default_db_path();
 
@@ -1246,14 +1235,8 @@ pub fn init_db() -> Result<()> {
 
 // `is_auto` marks downloads made by Settings > Auto Download, the only ones its sync may prune.
 fn create_downloads_table(conn: &Connection) -> Result<()> {
-    // Create table `downloads` if there is none - one row per (user, book or podcast
-    // episode) that's been downloaded for offline playback. `file_path` is the local
-    // audio file on disk; `duration`/`title`/`author` are snapshotted at download time
-    // so offline playback (server unreachable) doesn't need a network call just to
-    // render the player/sync progress locally. `kind` ("book" or "podcast") lets each
-    // media type's Auto Download sync prune only its own downloads - without it, an
-    // Auto Download sync for one media type would delete the other's downloads the
-    // moment its own current-list check doesn't recognize their ids.
+    // One row per downloaded book or episode, with metadata snapshotted for offline playback. `kind` keeps
+    // each media type's Auto Download from pruning the other's downloads.
     conn.execute(
         "CREATE TABLE IF NOT EXISTS downloads (
             username TEXT NOT NULL,

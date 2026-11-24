@@ -203,16 +203,8 @@ fn remove_stale_partials() {
     }
 }
 
-/// Downloads every audio file backing a book for offline playback, if not already
-/// downloaded - a book uploaded as separate per-chapter files gets one local file per
-/// server-side track, not just the first. Meant to be run in a background task, same
-/// as `cover_cache::fetch_and_cache_cover`.
-///
-/// There's no lighter-weight endpoint to resolve a book's direct-play URL(s) than
-/// actually starting a playback session (that's how `handle_l_book` itself gets them),
-/// so this opens one purely to read `audioTracks`/`duration`/`chapters` off the
-/// response and immediately closes it again - the server never sees a real listen out
-/// of this.
+/// Downloads every audio file of a book for offline playback (one file per server track). The only way
+/// to get the play URLs is to start a session, so this opens one and closes it straight away.
 pub async fn download_book(token: String, item_id: String, title: String, author: String, username: String, server_address: String, is_auto: bool) -> Result<()> {
     if is_downloaded(&username, &item_id) {
         return Ok(());
@@ -297,17 +289,7 @@ pub async fn download_episode(token: String, podcast_id: String, episode_id: Str
 /// Removes a book's or episode's local download and its db row, if any.
 pub fn remove_download(username: &str, item_id: &str) -> Result<()> {
     if let Some(downloaded) = get_download(username, item_id) {
-        // `file_path` is a legacy pointer at track 0's file only (see `download_book`'s
-        // comment) - removing just that one left every other track of a multi-file
-        // book (audiobooks split across several files, per-chapter or otherwise)
-        // orphaned on disk with no db row left to ever clean them up (confirmed live:
-        // a 9-track/318MB book's download row was deleted and the UI's "downloaded"
-        // marker cleared, but only `file_path` - never any of the other 8 files -
-        // was ever a remove_file target, so all 318MB silently stayed on disk).
-        // `tracks` is empty for a podcast episode (single file, `file_path` alone is
-        // authoritative there), so removing `file_path` too keeps that case working -
-        // redundant with `tracks[0].local_path` for a book, which just no-ops the
-        // second time via the same `let _ =` used everywhere else in this file.
+        // Remove every track's file; `file_path` too, which is all a podcast episode has.
         let _ = std::fs::remove_file(&downloaded.file_path);
         for track in &downloaded.tracks {
             let _ = std::fs::remove_file(&track.local_path);
@@ -360,15 +342,8 @@ pub fn list_downloads_on_disk(username: &str) -> Vec<DownloadEntry> {
     }
 }
 
-/// Settings > Auto Download: keeps the local download set mirroring the `count` most
-/// recently played books in Continue Listening (`ids` is already server-ordered
-/// most-recent-first) - downloads any of them not already downloaded, and removes any
-/// existing download whose id has fallen out of that top-`count` window (finished,
-/// pushed out by newer activity, or the window shrank), so disk usage stays bounded
-/// rather than growing forever. Runs in the background and is meant to be called once
-/// per Continue Listening refresh (see `App::new()`) - downloads happen one at a time
-/// rather than in parallel, so this doesn't try to saturate the connection with
-/// several hundred-MB-plus files at once.
+/// Auto Download for books: downloads the `count` most recent Continue Listening books (already in
+/// order), one at a time, and prunes its own downloads that fell out of that window.
 pub fn sync_auto_downloads(username: String, token: String, server_address: String, ids: Vec<String>, titles: Vec<String>, authors: Vec<String>, count: usize) {
     submit(&BOOK_SYNC, BookSync { username, token, server_address, ids, titles, authors, count }, sync_books);
 }
@@ -396,14 +371,8 @@ async fn sync_books(request: BookSync) {
     }
 }
 
-/// Settings > Auto Download for podcasts: keeps the local download set mirroring
-/// *every* episode currently in "New & Unfinished" - unlike books, there's no top-N
-/// cap, since the New & Unfinished list is already naturally bounded (episodes drop
-/// out once finished or no longer new). `episode_ids`/`podcast_ids`/`titles`/
-/// `podcast_titles` are parallel arrays (same row = same episode, matching
-/// `App`'s `ids_ep_cnt_list`/`_ids_cnt_list`/`_titles_cnt_list`/`titles_pod_cnt_list`).
-/// Pruning and downloading both key off episode id, same as `sync_auto_downloads` keys
-/// off book id - scoped to `kind = "podcast"` so this can never prune a downloaded book.
+/// Auto Download for podcasts: every episode in New & Unfinished (already bounded), pruning its own
+/// downloads of episodes that left it. The arrays are parallel (same index = same episode).
 pub fn sync_auto_downloads_podcasts(username: String, token: String, server_address: String, podcast_ids: Vec<String>, episode_ids: Vec<String>, titles: Vec<String>, podcast_titles: Vec<String>) {
     submit(&PODCAST_SYNC, PodcastSync { username, token, server_address, podcast_ids, episode_ids, titles, podcast_titles }, sync_podcasts);
 }

@@ -201,24 +201,9 @@ pub async fn get_new_and_unfinished_pod(token: &str, server_address: String, id_
         }
     });
 
-    // Exclude already-finished episodes. Unlike a book, a podcast episode's progress
-    // record can't be found by the bare episode ID alone - it needs the parent podcast's
-    // library item ID too (see `get_episode_progress`), the same two-ID shape playback
-    // and progress-sync already use. A 404/Err means the episode was never started,
-    // which counts as "unfinished", not excluded. The percent/current_time from this
-    // same call is stashed on the entity for display, so we don't need a second round
-    // of API calls just to show progress.
-    // One progress lookup per entity, issued concurrently rather than one-at-a-time -
-    // this loop was ~230ms per episode serially and is a meaningful share of startup
-    // (see bug_id 3f729c). `buffered` keeps results in request order so each progress
-    // record still lines up with the entity it belongs to; `buffer_unordered` would
-    // pair progress against the wrong episode. The filtering/logging below stays
-    // sequential and unchanged, so ordering and log output are identical to before.
-    // Each future owns everything it needs and is built up front, so the stream holds
-    // no borrow of the `&str` token param. Capturing that borrow instead (even
-    // indirectly, via a closure that clones it) makes every caller's enclosing future
-    // fail `Send` inference with a higher-ranked-lifetime error at the `tokio::spawn`
-    // sites in app.rs.
+    // Finished episodes are left out. An episode's progress needs the podcast id too, and a 404 means never
+    // started. Lookups run concurrently and `buffered` keeps them in entity order; the futures own their data
+    // so callers' spawned futures stay `Send`.
     let mut progress_futures = Vec::with_capacity(entities.len());
     for entity in &entities {
         let episode_id = entity.recent_episode.as_ref().and_then(|ep| ep.id.clone());

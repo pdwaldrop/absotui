@@ -8,14 +8,8 @@ use crate::player::session::{Track, TrackSource};
 use crate::player::vlc::exec_nc::exec_nc;
 use crate::db::crud::{get_speed_rate, get_is_per_item_speed, get_item_speed_rate, set_item_speed_rate};
 
-// Resolves the playback speed to launch the player with: per-item if Settings > Per-Item
-// Speed is on, otherwise the single shared speed_rate - unchanged from before this
-// setting existed. `id_item` is a book's id, or a podcast show's own id (shared across
-// its episodes). A per-item item that hasn't been touched yet always starts at a fixed
-// 1.0x baseline, not whatever the shared speed happens to be - turning Per-Item Speed
-// on already wipes every existing per-item row for exactly this reason (see
-// update_is_per_item_speed), so this only matters for an item played for the first
-// time since then.
+// Launch speed: the item's own if Per-Item Speed is on (1.0x until first adjusted), else the shared rate.
+// `id_item` is a book's id or a podcast show's id.
 fn resolve_speed_rate(username: &str, id_item: &str) -> String {
     if get_is_per_item_speed(username) != "1" {
         return get_speed_rate(username);
@@ -63,21 +57,8 @@ impl Player {
             Player::Vlc(vlc) => vlc_command(vlc, &start, source, speed_rate, track.author, track.subtitle, track.title),
         };
 
-        // Called from PlayerSession's own spawned task - a panic here (the old .expect())
-        // would silently kill that task with no user-visible error if the player binary
-        // is missing or misconfigured. The session does notice the player never came up
-        // and closes playback either way, but logging the actual cause here beats a
-        // silent no-op.
-        //
-        // The player is a long-running process - `Command::output()` blocks the calling thread
-        // until the child itself exits, ie. for the length of the whole track, not just
-        // until it launches. Left inline, that blocking call can starve whichever tokio
-        // worker thread happens to run it, stalling *other* tasks pinned to that same
-        // thread (confirmed live: a sibling task's plain `tokio::time::sleep` never woke
-        // up again while this ran directly inside a spawned async task, mid-playback,
-        // when switching a multi-file book to a different chapter's file).
-        // `spawn_blocking` moves it onto tokio's separate blocking-task thread pool
-        // instead, which doesn't participate in polling/timers for anything else.
+        // The player runs for the whole track, so `output()` blocks: run it on the blocking pool, not a runtime
+        // worker. A launch failure is logged rather than panicking (the session notices it never came up).
         tokio::task::spawn_blocking(move || {
             cmd.output()
                 .inspect_err(|e| error!("[start] Failed to execute {}: {e}", cmd.get_program().display()))

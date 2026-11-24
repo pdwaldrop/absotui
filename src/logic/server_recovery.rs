@@ -79,14 +79,8 @@ fn classify_error(report: &Report) -> (&'static str, String) {
     ("Audiobookshelf returned an error", format!("Reached the server, but something went wrong: {report}"))
 }
 
-/// Runs `App::new()` in a retry loop, showing a recovery screen on failure
-/// (Retry / change server address / Quit) instead of letting the error
-/// propagate out of `main` and silently kill the process.
-///
-/// `allow_cancel` adds an Esc-to-cancel option, returning `Ok(None)`. Only
-/// meaningful at the two mid-session reinit call sites (`R`-refresh, library
-/// switch) where a working `App` already exists to fall back to - startup
-/// has none, so it passes `false` and never sees `Action::Cancel`.
+/// Runs `App::new()` until it works, showing a recovery screen (Retry / change address / Quit) on failure.
+/// `allow_cancel` adds Esc to return `Ok(None)`, for reloads where a working `App` already exists.
 pub async fn init_app_with_retry(terminal: &mut DefaultTerminal, allow_cancel: bool) -> Result<Option<App>> {
     loop {
         match App::new().await {

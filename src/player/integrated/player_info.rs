@@ -2,12 +2,7 @@ use log::info;
 use crate::db::crud::{get_listening_session, get_speed_rate, get_is_speed_adjusted_time, get_is_per_item_speed, get_item_speed_rate};
 use crate::api::libraries::get_library_perso_view_pod::Chapter;
 
-// The speed rate actually in effect for this item: per-item (keyed by id_item) if
-// Settings > Per-Item Speed is on and this item has been played/adjusted before,
-// otherwise the single shared speed_rate. Read-only - unlike adjust_speed_rate/
-// resolve_speed_rate, display has no reason to seed a per-item row that doesn't exist
-// yet, but if per-item mode is on and it's somehow missing anyway, 1.0x (the fixed
-// baseline new items start at) is the correct fallback here, not the shared speed.
+// Speed in effect, for display: per-item if that setting is on (1.0x if not set yet), else the shared rate.
 fn effective_speed_rate(username: &str, id_item: &str) -> f32 {
     if get_is_per_item_speed(username) == "1" {
         return get_item_speed_rate(username, id_item).unwrap_or(1.0);

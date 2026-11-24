@@ -66,12 +66,7 @@ fn render_windowed_list<'a>(
     *state.offset_mut() = start;
 }
 
-// Shared by both render_desc_settings (the preview shown while "Update/Uninstall" is
-// merely highlighted in the Settings list) and render_update_uninstall_content (the
-// Instructions stage once you've actually entered that screen) - one string so the two
-// can't drift out of sync the way they did before (the preview kept describing a
-// quit-and-run-a-command-yourself flow long after Update now/Uninstall started running
-// things right here in-app).
+// One text for both the Settings preview and the Update/Uninstall screen, so they can't drift apart.
 const UPDATE_UNINSTALL_INSTRUCTIONS: &str = "\
 Select Update now or Uninstall and press Enter (l/\u{2192}) to run it right here - no need \
 to leave the app. Both may ask for your password.
@@ -145,16 +140,8 @@ impl App {
         App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
         App::render_footer(footer_area, buf, &text_render_footer);
 
-        // Pin the actively-playing item to the top. Runs on every render (not just on
-        // load/refresh) so it reacts as soon as playback starts. Books match by id_item;
-        // podcasts must match by episode ID (id_pod) since id_item there is the parent
-        // podcast's ID, which multiple episodes in this list could share.
-        //
-        // Gated on is_vlc_running: the listening_session row lingers indefinitely after
-        // playback ends (nothing clears it, only the next playback start overwrites it),
-        // so without this check, whichever item was last ever played would get yanked
-        // to the top of the list on every render forever - including right after a
-        // fresh app launch with nothing playing at all.
+        // Pin the playing item to the top, checked every render. Podcasts match by episode id (id_pod); gated on
+        // is_vlc_running since the session row outlives playback.
         if get_is_vlc_running(&self.username) == "1"
             && let Ok(Some(active_session)) = get_listening_session() {
             if !self.is_podcast
@@ -203,14 +190,7 @@ impl App {
             }
         }
 
-        // Which item (if any) matches the actual active listening session - distinct from
-        // wherever the cursor/highlight currently happens to be sitting in the list. Books
-        // match by id_item; podcasts must match by episode ID (id_pod), same reasoning as
-        // the reorder above.
-        //
-        // Gated on is_vlc_running for the same reason as the reorder above - the session
-        // row lingers after playback ends, so without this the "now playing" marker would
-        // sit on whatever was last ever played, forever, even with nothing playing.
+        // The row actually playing (for the marker), matched as in the reorder above and gated the same way.
         let active_session = (get_is_vlc_running(&self.username) == "1").then(|| get_listening_session().ok().flatten()).flatten();
         let now_playing_id: Option<String> = active_session.as_ref().map(|s| if self.is_podcast { s.id_pod.clone() } else { s.id_item.clone() });
 
@@ -229,16 +209,7 @@ impl App {
         };
 
         let progress_info: Option<Vec<(String, f32, bool)>> = if self.is_podcast {
-            // Progress percent isn't shown here - it isn't as meaningful for a list
-            // already filtered to "new or unfinished" episodes. Instead the time slot
-            // shows the episode's age (e.g. "1Day", "2Weeks"), with percent forced to
-            // 0.0 so it renders as plain text with no underline fill.
-            //
-            // Left-aligned within a fixed-width field (trailing spaces, not leading) so
-            // the leading character (the digit, or the "T" of "Today") lands in the same
-            // column on every row - right-padding instead of left-padding, since the
-            // labels vary in length and right-aligning only lines up their trailing
-            // edge. Width is wide enough for the longest realistic label ("12Months").
+            // Episodes show their age instead of progress, left-aligned in a fixed width so rows line up.
             const AGE_LABEL_WIDTH: usize = 8;
             let now_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -291,18 +262,8 @@ impl App {
                 HomeRow::Chapter { .. } => (String::new(), 0.0, false),
             }).collect())
         };
-        // Podcasts: show "Episode Title | Podcast Title" in the list row, not just the
-        // episode title alone - _titles_cnt_list is episode titles, titles_pod_cnt_list
-        // is the parent podcast's own title.
-        // Downloaded status is local-only state, not part of the fetched list data -
-        // looked up directly here rather than threaded through as another parallel
-        // array (see the parallel-arrays warning in CLAUDE.md for why that'd be worth
-        // avoiding for something this orthogonal to the server-fetched row data).
-        //
-        // The marker is prefixed, not suffixed - a suffix on a long title gets cut off
-        // entirely by the truncation/ellipsis below (see MIN_TITLE_GAP and the scroll
-        // logic in render_list), since it never survives past the ellipsis on an
-        // unselected long row. A prefix is always visible.
+        // Podcast rows read "Episode | Podcast". The downloaded marker is looked up per row (local state, not
+        // another parallel array) and goes first, so truncation can't cut it off.
         const DOWNLOADED_MARKER: &str = "⬇ ";
         let display_titles: Vec<String> = if self.is_podcast {
             self._titles_cnt_list.iter().enumerate().map(|(i, ep_title)| {
@@ -436,12 +397,7 @@ impl App {
         self.render_list(main_area, buf, render_list_title, &rows, &mut self.list_state_collections.clone(), None);
     }
 
-    /// `AppView::Stats` rendering - a read-only dashboard built from `self.stats_summary`
-    /// (see `collect_stats_summary`), itself built from Audiobookshelf's per-user
-    /// `/api/me/listening-stats` - not scoped to the currently selected library.
-    // Panel heights for the virtual canvas below - kept as named constants since
-    // both the canvas's total height and each panel's Layout::vertical slice need
-    // to agree on them.
+    // Panel heights, shared by the Stats canvas's total height and its layout.
     const STATS_OVERVIEW_H: u16 = 6;
     const STATS_CHART_H: u16 = 10;
     const STATS_DAY_OF_WEEK_H: u16 = 10;
@@ -449,12 +405,8 @@ impl App {
     const STATS_RANKINGS_H: u16 = 16;
     const STATS_RECENT_SESSIONS_H: u16 = 10;
 
-    /// The Stats screen has more content than fits most terminal heights at once, so
-    /// unlike every other screen it renders into a tall off-screen `Buffer` (sized to
-    /// every panel's natural height) and copies a `scroll_offset`-shifted window of
-    /// that into the real visible area - the same technique `render_footer` already
-    /// uses for its own variable-height content, just applied to a whole screen of
-    /// mixed widgets instead of one wrapped `Paragraph`.
+    /// Stats is taller than most terminals: it renders into a tall off-screen buffer and copies the
+    /// `scroll_offset` window into view.
     fn render_stats(&mut self, area: Rect, buf: &mut Buffer) {
         let mut hints = vec![("J/K/H", "Scroll stats")];
         hints.extend(Self::footer_trailer("Home", true));
@@ -587,12 +539,8 @@ impl App {
             .render(area, buf);
     }
 
-    /// Hand-painted GitHub-style contribution graph - no ratatui widget fits this
-    /// shape. Cell intensity is bucketed relative to the *user's own* max single-day
-    /// value in the visible window (not a fixed absolute threshold), and uses
-    /// character density at one accent color rather than a custom RGB gradient,
-    /// matching this app's terminal-native-theming principle (no palette to
-    /// maintain) - the same choice the bar charts above already make.
+    /// GitHub-style activity graph, drawn by hand. Intensity is relative to the user's own busiest day and
+    /// uses character density in one accent color, keeping to the terminal's own theme.
     fn render_stats_heatmap(&self, area: Rect, buf: &mut Buffer) {
         let block = theme::section_block("Activity");
         let inner = block.inner(area);
@@ -713,13 +661,7 @@ impl App {
     /// `AppView::Settings` rendering
     fn render_settings(&mut self, area: Rect, buf: &mut Buffer) {
         let selected = self.list_state_settings.selected();
-        // About is the only entry with a list-level preview (render_desc_settings
-        // scrolls its changelog right here without entering a separate screen) -
-        // Update/Uninstall used to get its own "Scroll instructions" hint too, but
-        // render_desc_settings has deliberately never shown anything for it (its
-        // Instructions stage already covers that once you actually enter the
-        // screen), so that hint advertised a scroll that did nothing. Every other
-        // entry, including Update/Uninstall, just gets the normal "enter" hint.
+        // Only About has a preview here, so only it gets a scroll hint; every other entry gets the enter hint.
         let _text_render_footer = if selected == self.settings_index(SETTINGS_ABOUT) {
             let mut hints = vec![("h", "Back"), ("J/K/H", "Scroll what's new")];
             hints.extend(Self::footer_trailer("Home", false));
@@ -1052,14 +994,8 @@ impl App {
 
         let render_list_title = "Search result";
 
-        // init variables for search result - matches on title or author, so e.g.
-        // searching "sanderson" finds every book by Brandon Sanderson even if none of
-        // their titles contain that word. Author comes from whichever of the two
-        // author lists actually applies to the current library type (podcasts and
-        // books each have their own, indexed the same way as titles_library).
-        // The filter and the ~16 array gathers below only depend on the query and on whether the
-        // background episode prefetch has landed, so they are redone only when one of those
-        // changes - not on every frame the results are on screen.
+        // Search matches title or author. The filter and gathers below only change with the query or when the
+        // episode prefetch lands, so they're recomputed then, not every frame.
         let episodes_ready = self.pod_ep_receiver.is_none();
         let filter_is_stale = self.search_filter_cache.as_ref()
             .is_none_or(|(query, ready)| *query != self.search_query || *ready != episodes_ready);
@@ -1085,14 +1021,7 @@ impl App {
             }
 
 
-            // Indexed gathers, not filter+contains scans: the old shape re-scanned
-            // `index_to_keep` for every one of the library's N items in each of the 16
-            // arrays below (O(N*M) per array, every frame) just to keep the same M
-            // indices. `index_to_keep` already holds exactly the indices to keep, in
-            // order, so index straight into the source arrays. The `all_*` arrays use
-            // `.get()` rather than `[]` because they're empty until the background
-            // episode fetch lands (bug_id 3f729c) - filtering then just yields nothing,
-            // same as before.
+            // Gather by index. The `all_*` arrays use `.get()`: they stay empty until the episode fetch lands.
             self.ids_search_book = index_to_keep
                 .iter()
                 .map(|&i| self.ids_library[i].clone())
@@ -1225,18 +1154,8 @@ impl App {
         }
     }
 
-    /// The search box (`/`), drawn as an overlay on top of whatever's already been
-    /// rendered above - part of the same single render pass as everything else (see
-    /// the `render()` dispatch above), not a separate `Terminal` instance racing the
-    /// main loop's own. `Clear` first, since `TextArea`'s own render only draws its
-    /// border plus whatever text/cursor it actually holds - an empty box wouldn't
-    /// otherwise blank the content already sitting in its area from the same buffer.
-    ///
-    /// Fills `target` exactly - callers with their own Info box (Home, Library,
-    /// Settings, SearchBook, PodcastEpisode) pass that Rect directly, so the box
-    /// replaces the low-value Info summary (author/year/duration - a quick glance
-    /// away regardless) instead of sitting over the Description panel, which has the
-    /// actual synopsis text and cover art worth keeping visible while typing.
+    /// The `/` search box, drawn over the Info panel so the description and cover stay visible. `Clear`
+    /// first, since an empty TextArea wouldn't blank what's under it.
     fn render_search_overlay(&mut self, target: Rect, buf: &mut Buffer) {
         ratatui::widgets::Clear.render(target, buf);
         (&self.search_textarea).render(target, buf);
@@ -1461,12 +1380,7 @@ impl App {
         );
     }
 
-    /// The complete, authoritative keybind list for `self.keymap_return_view` - not
-    /// just a copy of that screen's (deliberately curated) footer text. Mirrors
-    /// `App::handle_key`'s own guards exactly (is_podcast/is_from_search_pod) so
-    /// this can't drift the way the old footers had (T/B are global but were
-    /// missing from most footers; D silently worked from any screen when
-    /// is_podcast despite only Home's footer mentioning it).
+    /// Every key binding for `keymap_return_view`, mirroring `App::handle_key`'s guards so it can't drift.
     fn keymap_entries(&self) -> Vec<(&'static str, &'static str)> {
         // Global keys that work from every real screen (everywhere except the 4
         // modal Update/Uninstall sub-stages, which own input themselves and are
@@ -1627,13 +1541,8 @@ impl App {
             .render(inner, buf);
     }
 
-    /// When the footer wraps onto 2+ lines, one blank row is inserted right after
-    /// the first line so the wrapped chips don't read as a single crowded block -
-    /// exactly one row is added no matter how many lines wrap (see `footer_height`
-    /// below for why that cap matters), so only the gap after line 1 exists; any
-    /// further wrapped lines stay packed tight against each other. Rendered
-    /// off-screen first (at its natural, un-spaced height) and then copied into
-    /// `area`, which `standard_layout` has already sized to fit that one gap row.
+    /// A wrapped footer gets one blank row after its first line. Rendered off-screen at natural height, then
+    /// copied into `area`, which `standard_layout` sized for that one gap row.
     fn render_footer(area: Rect, buf: &mut Buffer, text_render_footer: &Text<'static>) {
         let content_rows = Self::footer_row_count(text_render_footer, area.width);
         let offscreen_area = Rect::new(0, 0, area.width, content_rows);
@@ -1663,22 +1572,8 @@ impl App {
             .max(1) as u16
     }
 
-    /// The standard header/main/player/refresh/footer vertical split, with the footer
-    /// sized to however many rows its (wrapped) text actually needs at this width -
-    /// a fixed-height footer silently drops whichever of its lines don't fit once
-    /// wrapping kicks in on a narrow terminal (confirmed live: shrinking the window
-    /// until line 1 wrapped made line 2 disappear entirely, since a 2-row area has
-    /// nowhere left to put it once line 1 alone consumes both rows). A wrapped (2+
-    /// row) footer gets exactly one extra row on top of its content rows (see
-    /// `render_footer`'s single fixed gap).
-    ///
-    /// Records the resulting footer height on `self.last_footer_height` - it varies
-    /// per screen and per width, and `render_player`'s Now Playing box (drawn by
-    /// main.rs from a separate, non-widget code path with no layout of its own)
-    /// needs the real value to position itself without either overlapping the
-    /// footer or leaving a gap the app's own next frame paints over (confirmed
-    /// live: a fixed worst-case guess here was wrong as soon as the footer's
-    /// actual height fell outside the one specific range it was tuned for).
+    /// Header/main/player/refresh/footer split, with the footer sized to its wrapped text at this width.
+    /// Stores the footer height in `last_footer_height` for the Now Playing box, which main.rs draws apart.
     fn standard_layout(&mut self, area: Rect, footer_text: &Text<'static>) -> [Rect; 5] {
         let content_rows = Self::footer_row_count(footer_text, area.width);
         let footer_height = if content_rows > 1 { content_rows + 1 } else { content_rows };
@@ -1700,16 +1595,8 @@ impl App {
     const FOOTER_LIST_JUMP: (&'static str, &'static str) = ("g/G", "Top/bot");
     const FOOTER_SCROLL_DESC: (&'static str, &'static str) = ("J/K/H", "Scroll desc");
 
-    // The trailing "Tab" / "R: refresh" / "[S: settings]" / "Q/Esc: quit" hints every
-    // footer ends with - `tab_target` differs (Home's Tab goes to Library, everywhere
-    // else's Tab goes to Home), and the Settings submenus don't mention `S` since
-    // you're already there.
-    //
-    // `show_settings` also happens to be exactly "are we already on a Settings-family
-    // screen" at every call site, so it's reused to drop `R` there too: refresh
-    // re-fetches library/podcast data, which nothing on a Settings screen displays, and
-    // it fully reinits the app - landing back on Home - so its only visible effect there
-    // duplicates what "Tab: home" already advertises.
+    // The Tab / R / S / Q hints every footer ends with. Settings screens drop S and R (refresh shows
+    // nothing there and lands on Home, same as Tab).
     fn footer_trailer(tab_target: &'static str, show_settings: bool) -> Vec<(&'static str, &'static str)> {
         let mut hints = vec![("Tab", tab_target)];
         if show_settings {
@@ -1729,19 +1616,8 @@ impl App {
         // the highlight_symbol (a vertical bar) below, leaving the row itself untouched.
         let selected_style: Style = Style::default();
 
-        // ACCENT_KEY (yellow) on the handful of Settings sub-screens whose own list IS
-        // the action - selecting a row there (l/→) immediately applies a real change
-        // (switches library, flips a toggle, or - Account - arms the removal
-        // confirmation below) rather than just navigating deeper, same reasoning as
-        // the search box and the Update/Uninstall Confirm/Working/Password stages.
-        // Account's own Confirm panel escalates to ACCENT_ERROR (red) once armed (see
-        // render_settings_account) since l/→ there is irreversible, but the list
-        // itself stays yellow like its siblings until that point. PodcastAdd's Results
-        // stage is the same shape (l/→ advances the add-podcast flow, reached via the
-        // `A` chip on Library) - see PodcastAdd's own Confirm stage for the equivalent
-        // of Account's escalation. Every other list (Home, the main Library view,
-        // Settings' own menu, SearchBook, PodcastEpisode) is just browsing/navigation,
-        // so stays ACCENT_STRUCTURE.
+        // Yellow (ACCENT_KEY) where selecting a row applies a change - those Settings lists and PodcastAdd's
+        // results; plain browsing lists stay ACCENT_STRUCTURE.
         let list_accent = match self.view_state {
             AppView::SettingsLibrary | AppView::SettingsAutoplay | AppView::SettingsAccount
                 | AppView::SettingsPerItemSpeed | AppView::SettingsAutoDownload | AppView::SettingsPlayer | AppView::PodcastAdd => theme::ACCENT_KEY,
@@ -1749,22 +1625,10 @@ impl App {
         };
         let block = theme::section_block(render_list_title).border_style(Style::new().fg(list_accent));
 
-        // Approximate content width available inside each row: `block`'s own left/right
-        // border columns (2 - List::block computes block.inner(area) before laying out
-        // rows) plus the "▎" highlight symbol column that HighlightSpacing::Always
-        // reserves on every row (1). Missing the border columns here (only the highlight
-        // symbol was accounted for) made every row's computed padding 2 columns too wide,
-        // pushing the actual render past the real available width and clipping the
-        // rightmost couple of characters - visible as truncated progress percentages.
+        // Row width inside the list: 2 border columns plus the 1-column highlight symbol.
         let content_width = area.width.saturating_sub(3) as usize;
 
-        // Minimum gap (in characters) always kept clear between a title and the
-        // time/age label, so a long title can never push the label off the row -
-        // it gets truncated (or, on the selected row, scrolled) instead. Kept small
-        // since the podcast age label already reserves its own trailing space via
-        // its fixed-width left-alignment (see AGE_LABEL_WIDTH in render_home) - this
-        // is just a little breathing room on top of that, and the only gap at all
-        // for the book list's variable-length progress text.
+        // Gap always kept between a title and its right-hand label; a longer title is truncated or scrolled.
         const MIN_TITLE_GAP: usize = 2;
         // How many ticks the marquee scroll holds still at the start/end of a
         // truncated title before continuing - purely a readability pause.
@@ -1788,15 +1652,7 @@ impl App {
                 let title = &render_list_items[i];
                 match progress_info.and_then(|p| p.get(i)) {
                     Some((progress_text, percent, is_now_playing)) => {
-                        // Line 1: now-playing marker (cobalt/progress-colored background) +
-                        // title on the left, time/duration right-justified.
-                        //
-                        // The colored box itself is 3 columns wide with the ▶ glyph in the
-                        // middle column, so the icon sits centered within its own box. A
-                        // separate plain (uncolored) 1-column gap follows the box before
-                        // the title, matching the 1-column blank the selection highlight
-                        // symbol ("▎ ") already leaves before the box - so the box as a
-                        // whole ends up with equal blank space on both sides of it too.
+                        // Now-playing marker: a 3-column colored box with ▶ in the middle, then a 1-column gap before the title.
                         const MARKER_BOX_WIDTH: usize = 3;
                         const MARKER_GAP_WIDTH: usize = 1;
                         const MARKER_TOTAL_WIDTH: usize = MARKER_BOX_WIDTH + MARKER_GAP_WIDTH;
@@ -1972,12 +1828,8 @@ impl App {
         }
     }
 
-    // Picks which cover cache entry to show for the current Home selection: books just
-    // use their own item id. Podcast episodes prefer their own embedded cover art when
-    // the episode's audio file was flagged at scan time as having one, kicking off a
-    // background fetch the first time such an episode is selected; until that lands (or
-    // if the episode has no embedded art at all) this falls back to the parent podcast's
-    // cover, same id used before episode covers existed.
+    // Cover for the Home selection: a book's own; for an episode, its embedded art when it has some (fetched
+    // on first selection), else the podcast's cover.
     fn cover_id_for_home_selection(&mut self, selected: usize) -> Option<String> {
         let podcast_id = self._ids_cnt_list.get(selected).cloned();
         if !self.is_podcast {

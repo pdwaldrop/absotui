@@ -247,21 +247,8 @@ pub async fn handle_l_pod_home(
                         let _ = session.quit_gracefully();
                         info!("[handle_l_pod_home][Finished] Track finished");
 
-                        // Podcast Autoplay: if on, and the live "New & Unfinished"
-                        // queue has something adjacent to this episode to play next,
-                        // finish_episode returns it to start - otherwise stop here
-                        // just like before this feature existed.
-                        //
-                        // (finish_episode re-fetches the queue rather than just
-                        // advancing to the next index of the list this task started
-                        // with: that list is a one-time snapshot taken back when the
-                        // user first pressed play, and can be badly stale by the time
-                        // a later episode in an autoplay chain finishes - new episodes
-                        // arrive, others get marked finished and drop out, entirely
-                        // independent of this chain. Indexing into the stale snapshot
-                        // could "autoplay" into whatever used to be next in that old
-                        // ordering - including an episode already listened to earlier -
-                        // rather than what's actually next in the live queue.)
+                        // Autoplay: finish_episode re-fetches the live queue (the list at play time may be stale) and returns
+                        // what's next, if anything.
                         let next_episode = finish_episode(
                             &token,
                             &id,
@@ -278,22 +265,8 @@ pub async fn handle_l_pod_home(
 
                         if let Some((next_id, next_id_pod, next_published_at)) = next_episode {
                             info!("[handle_l_pod_home][Finished] Autoplay is on, advancing to next episode");
-                            // Deliberately NOT setting is_loop_break here - this task
-                            // is about to keep running for the next episode, not
-                            // actually exit. `wait_prev_session_finished` (run before
-                            // any fresh manual play) polls this exact flag to know
-                            // this background task is done - setting it here on every
-                            // mid-chain transition let it go stale, so a manual replay
-                            // of the still-autoplaying episode would see a false "done"
-                            // and spawn a second task racing this same one over the
-                            // player and the shared listening_session row.
-                            //
-                            // The player doesn't exit on its own at end-of-track, it
-                            // just goes idle - without explicitly quitting it here (same
-                            // as every other place that starts new playback does), it
-                            // keeps holding its control port/socket, and all
-                            // control/sync ends up silently talking to this
-                            // now-finished instance instead.
+                            // No is_loop_break here: this task keeps running for the next episode, and a stale "done" would let a
+                            // second task start. The finished player still holds the control port, so quit it first.
                             let _ = session.quit();
                             id = next_id;
                             id_pod_ep = next_id_pod;
@@ -326,18 +299,8 @@ pub async fn handle_l_pod_home(
     }
 }
 
-/// Marks the episode finished server-side, closes its session, and updates
-/// is_vlc_running - the common tail shared by the natural end-of-track path
-/// (`PlaybackStatus::Finished`) and a manual "mark finished while still playing"
-/// request (F in the Home list, signaled via listening_session.is_finished and caught
-/// at the top of the polling loop) - the two differ only in whether the player itself
-/// has already stopped or the caller had to tell it to first, which happens before
-/// this runs either way.
-///
-/// Returns what to autoplay next (podcast id, episode id, published_at) if Podcast
-/// Autoplay is on and the live "New & Unfinished" queue has something adjacent to
-/// this episode - see `next_autoplay_episode` for why that's a fresh queue fetch
-/// rather than just the next index of a possibly-stale snapshot.
+/// Marks the episode finished on the server, closes its session and clears is_vlc_running - shared by
+/// a natural end and Mark Finished (F). Returns what to autoplay next, if autoplay is on.
 async fn finish_episode(
     token: &String,
     id: &str,
@@ -368,32 +331,9 @@ async fn finish_episode(
     }
 }
 
-/// Fetches the current "New & Unfinished" queue fresh and returns the (podcast id,
-/// episode id, published_at) of whatever's genuinely adjacent to the episode that just
-/// finished, in the same sort order the Home list itself uses (respects whichever sort
-/// direction was active when this autoplay chain started - `newest_first`, captured once
-/// at the top-level play same as the rest of this task's state).
-///
-/// This is deliberately NOT "whatever's at the front of the queue": the episode that
-/// just finished isn't necessarily the newest (or oldest) unfinished one - it could sit
-/// anywhere in the sort order - so "next" has to mean "the closest one on the other
-/// side of it," found via `current_published_at`, not "the global top of the list."
-/// Picking the global top would autoplay into whatever's chronologically first
-/// regardless of where the just-finished episode actually was, which can be a
-/// completely different, unrelated episode - including one already listened to earlier.
-///
-/// `current_published_at` is `None` only for the very first episode of a chain if its
-/// publish date wasn't available; in that case this falls back to the queue's front,
-/// same as before this refinement. Returns `None` if the queue is empty, the fetch
-/// fails, or - when `current_published_at` is known - there's nothing further along in
-/// the current sort direction (the just-finished episode was already the last one),
-/// in which case autoplay stops like before this feature existed rather than wrapping
-/// back around to the top.
-///
-/// `current_id_pod` (the just-finished episode) is explicitly excluded from candidacy -
-/// its own isFinished update may not have propagated server-side by the time this fetch
-/// runs, in which case it would still match its own published_at via the `<=`/`>=`
-/// comparison and get picked as "next," replaying itself forever.
+/// Fetches the live New & Unfinished queue and returns the episode after the finished one in the list's
+/// sort order (by `current_published_at`; the front if unknown), or None at the end. The finished episode
+/// is excluded, since its isFinished may not have reached the server yet.
 async fn next_autoplay_episode(token: &str, server_address: &str, id_selected_lib: &str, newest_first: bool, current_published_at: Option<i64>, current_id_pod: &str) -> Option<(String, String, i64)> {
     let roots = get_new_and_unfinished_pod(token, server_address.to_string(), &id_selected_lib.to_string()).await.ok()?;
     let ids = collect_ids_pod_cnt_list(&roots).await;

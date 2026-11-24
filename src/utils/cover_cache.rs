@@ -22,18 +22,9 @@ fn covers_dir() -> PathBuf {
     config_home_path.join("absotui/covers")
 }
 
-/// Path a given item's cached cover would live at, regardless of whether it's been
-/// fetched yet - image format is auto-detected from the file's contents at load time,
-/// so no extension is needed.
-///
-/// `item_id` comes straight from the configured Audiobookshelf server's JSON responses,
-/// unvalidated - a malicious or compromised server (or a MITM on a plain `http://`
-/// connection) could hand back an id like `"../../../../home/user/.ssh/authorized_keys"`
-/// and have this app write that response's bytes there via `fs::write`. Real item ids
-/// are opaque UUIDs and never need anything beyond alphanumerics/hyphens/underscores, so
-/// stripping everything else both closes that off (the result can never contain `/`, `\`,
-/// or `.`, so it can't escape `covers_dir()` or reference `..`) and is a no-op for every
-/// legitimate id.
+/// Where an item's cover is cached (format is detected on load, so no extension). The id comes from the
+/// server unchecked, so anything but alphanumerics, `-` and `_` is stripped - no path can escape
+/// `covers_dir()`.
 pub fn cover_cache_path(item_id: &str) -> PathBuf {
     let safe_id: String = item_id
         .chars()
@@ -60,12 +51,8 @@ pub async fn fetch_and_cache_cover(token: String, item_id: String, server_addres
     Ok(())
 }
 
-/// Fetches an arbitrary public image URL (e.g. iTunes artwork for a podcast search
-/// result that isn't a library item yet, so has no Audiobookshelf item id/cover
-/// endpoint of its own) and writes it to the local cache under `cache_key`, if not
-/// already cached. Unauthenticated - unlike `fetch_and_cache_cover`, this never sends
-/// the server's own bearer token, since the URL points at a third party (iTunes), not
-/// the configured Audiobookshelf server.
+/// Caches a public image URL (e.g. iTunes artwork for a search result) under `cache_key`. Sends no
+/// token: the URL is a third party's, not the server's.
 pub async fn fetch_and_cache_external_cover(url: String, cache_key: String) -> Result<()> {
     let path = cover_cache_path(&cache_key);
     if path.exists() {

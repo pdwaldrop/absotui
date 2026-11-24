@@ -93,14 +93,8 @@ impl Database {
         // init empty Vec<User> for future add of users
         let users: Vec<User> = vec![];
 
-        // Retrieve the default user. A failed query here (eg. the db is briefly
-        // locked right after a user was deleted/changed and the app was immediately
-        // restarted) used to be silently treated the same as "no default user
-        // exists", sending a returning user back to the login screen with no
-        // explanation (bug_id 2eb9e3). Retry a few times first since this is
-        // normally transient and self-resolves within a second or two; if it's
-        // still failing after that, surface it via the login screen's existing
-        // error banner instead of staying silent.
+        // Read the default user, retrying briefly: a locked database right after a change is transient, and
+        // failing silently would send a returning user to the login screen. A lasting failure is shown there.
         let mut default_usr: Vec<String> = Vec::new();
         let mut last_err = None;
         for attempt in 0..5 {

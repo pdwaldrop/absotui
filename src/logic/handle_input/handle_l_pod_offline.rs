@@ -9,16 +9,8 @@ use crate::db::crud::{insert_listening_session, update_is_vlc_running, update_cu
 use crate::api::server::refresh_token::{maybe_refresh_token, RefreshOutcome};
 use crate::db::database_struct::DownloadedItem;
 
-/// Plays a downloaded podcast episode with no server session at all - used when
-/// `post_start_playback_session_pod` fails (server unreachable) but a local copy of the
-/// episode exists (see src/utils/download_cache.rs). Shared by both handle_l_pod_home
-/// and handle_l_pod, since the offline case is identical either way - no
-/// `sync_session`/`update_media_progress`/`close_session` calls happen during playback
-/// (no server-issued session id to attach them to), and - unlike the online path -
-/// there's no Podcast Autoplay here: advancing to a next episode needs a live fetch of
-/// the current New & Unfinished/episode-list queue, which isn't available offline.
-/// Mirrors handle_l_book.rs's handle_l_book_offline exactly, adapted for the extra
-/// podcast/episode id split and the podcast progress-update endpoints.
+/// Plays a downloaded episode with no server session (server unreachable), for both Home and the episode
+/// list. No autoplay: picking a next episode needs the server. Mirrors `handle_l_book_offline`.
 pub async fn handle_pod_episode_offline(
     podcast_id: String,
     episode_id: String,

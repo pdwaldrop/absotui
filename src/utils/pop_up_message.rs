@@ -6,16 +6,8 @@ use crossterm::{
     terminal, cursor,
 };
 
-// pop_message/clear_message write straight to stdout, bypassing ratatui's own
-// diff cache - the next `terminal.draw` can decide a cell already matches its
-// stale cache and skip repainting it, even though clear_message just blanked it
-// for real (see main.rs's 'R'/library-switch handling, which calls
-// `terminal.clear()` right after clear_message for exactly this reason). Call
-// sites that have a `Terminal` in scope do that directly; call sites that don't
-// (background `tokio::spawn`ed playback tasks - see `wait_prev_session_finished`)
-// set this flag instead, which the main render loop polls every iteration
-// alongside its other cross-task signals (see `poll_pod_ep_fetch` and friends).
-// `clear_message` sets it itself, so no caller can blank a row and forget the repaint.
+// Status messages print straight to the terminal, bypassing ratatui's diff cache. Code without a
+// `Terminal` sets this and the main loop repaints fully; `clear_message` sets it itself.
 pub static NEEDS_TERMINAL_CLEAR: AtomicBool = AtomicBool::new(false);
 
 pub const PLAYBACK_START_FAILED: &str = "Couldn't start playback - check the server connection and try again";

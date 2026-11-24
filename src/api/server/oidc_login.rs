@@ -11,12 +11,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::UnboundedReceiver;
 
-// Signing in through an identity provider (authentik, Keycloak, ...) uses Audiobookshelf's
-// native-app OpenID flow: PKCE, with the browser redirected back to a loopback address.
-// Confirmed against the server's own `Auth.js` and `OidcAuthStrategy.js`, since the public
-// docs don't describe it. The server only accepts redirect addresses its admin has listed
-// under "Allowed Mobile Redirect URIs", and its check for that list rejects any address with
-// a port number, so the default is the plain loopback address (port 80).
+// SSO uses Audiobookshelf's native-app OpenID flow (PKCE, browser redirected to a loopback address), read
+// from the server's Auth.js/OidcAuthStrategy.js. Admins must allow the address, and the server rejects any
+// with a port, so the default is the plain loopback address (port 80).
 
 /// The old default port. Audiobookshelf never accepted an address with it, but it was
 /// written into every config.toml, so it now means "use the default".

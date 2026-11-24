@@ -2,13 +2,8 @@ use reqwest::Client;
 use std::sync::LazyLock;
 use std::time::Duration;
 
-// reqwest's default client has *no* request timeout at all, so a server that accepts a
-// connection and then never answers leaves the calling task awaiting forever. That isn't
-// hypothetical here: the playback-session close/sync calls run inside the spawned
-// playback task, and `wait_prev_session_finished` blocks every future play attempt until
-// that task signals it finished - so one hung request could wedge playback with no way
-// out but restarting the app (see known_bugs.md `bug_id: bf10cd`). Same idea as the read
-// timeouts on the player control sockets.
+// reqwest has no request timeout by default, so a server that never answers would hang the caller - in
+// a playback task, that would block every later play.
 
 // Generous enough not to abort a legitimately slow-but-working request (measured
 // round-trips against a real server sit around 1-2s, so this is ~30x headroom, and a
@@ -39,26 +34,14 @@ static API_CLIENT: LazyLock<Client> = LazyLock::new(|| {
         .unwrap_or_else(|_| Client::new())
 });
 
-/// Client for ordinary API calls - JSON endpoints, cover images, ranged metadata reads.
-/// Everything with a bounded, small response body.
-///
-/// One shared client (a `Client` clone is a cheap handle to the same connection pool), so
-/// repeated calls reuse an open connection and its TLS session instead of paying a new
-/// TCP + TLS handshake - and a fresh client's setup cost - on every request.
-///
-/// Falls back to a plain `Client::new()` if the builder somehow fails, since losing the
-/// timeout is strictly better than failing the request outright - that's exactly the
-/// behavior every call site had before this existed.
+/// The shared client for API calls (small responses): reuses connections and TLS sessions across calls.
+/// Falls back to `Client::new()` if building fails, losing only the timeout.
 pub fn api_client() -> Client {
     API_CLIENT.clone()
 }
 
-/// Client for bulk downloads (offline playback copies), which legitimately run for
-/// minutes on a large audiobook or a slow connection - a total-duration cap would abort
-/// exactly the transfers it's meant to protect. Only the connect phase is bounded, so an
-/// unreachable server still fails fast while a working-but-slow transfer runs to
-/// completion. The per-read limit only trips when data stops arriving altogether, so a
-/// stalled transfer fails (and resumes later) instead of hanging the download worker.
+/// Client for downloads, which can take minutes: only connecting is time-limited, plus a read limit
+/// that trips only when data stops arriving, so a stalled transfer fails and resumes later.
 pub fn download_client() -> Client {
     Client::builder()
         .user_agent(USER_AGENT)
@@ -69,15 +52,8 @@ pub fn download_client() -> Client {
         .unwrap_or_else(|_| Client::new())
 }
 
-/// Cap on in-flight HTTP requests when a startup/refresh phase fans out one request
-/// per item (per-podcast episode lists, per-item progress lookups). Bounded so a large
-/// library doesn't open an unbounded number of connections at once, or look like a
-/// burst to the server - while still turning `n` sequential round-trips into roughly
-/// `ceil(n / this)`.
-///
-/// Always fan out with `futures::stream::...buffered()`, never `buffer_unordered()`:
-/// callers feed results straight into index-aligned parallel arrays, which silently
-/// desync if results come back in completion order instead of request order.
+/// Cap on concurrent requests when fanning out one per item. Always use `buffered()`, never
+/// `buffer_unordered()`: callers rely on request order for their parallel arrays.
 pub const MAX_CONCURRENT_REQUESTS: usize = 12;
 
 #[cfg(test)]

@@ -22,15 +22,8 @@ enum UpdateError {
     Other(String),
 }
 
-// Runs the same hello_absotui.sh flow `absotui --update`/`--uninstall` already runs
-// (see clap.rs's run_hello_absotui), but from inside a live TUI session instead of a
-// fresh CLI invocation: drive the script's own interactive prompts with scripted stdin
-// answers, stream its output back line by line instead of letting it own the terminal
-// directly, and detect+relay whatever sudo prompt (fingerprint reader first if the system
-// has one configured, falling back to a typed password) its own internal `sudo` calls
-// happen to trigger along the way. Returns a channel to push typed passwords back in on
-// ProgressEvent::NeedPassword, since we don't know up front whether one will even be
-// asked for.
+// Runs hello_absotui.sh update/uninstall from inside the TUI: answers its prompts, streams its output,
+// and relays any sudo prompt (fingerprint or password). The returned sender takes typed passwords.
 pub fn spawn(action: Action) -> (UnboundedReceiver<ProgressEvent>, UnboundedSender<String>) {
     let (tx, rx) = mpsc::unbounded_channel();
     let (password_tx, password_rx) = mpsc::unbounded_channel();
@@ -72,12 +65,8 @@ fn install_script(action: Action) -> String {
     )
 }
 
-// No separate sudo pre-validation/keepalive here on purpose (a prior version had one,
-// and it was a silent no-op: `spawn_borrowed` makes every process it spawns claim the
-// pty as its controlling terminal, which fails while the script's own session already
-// holds it). Just run the script - its own first internal `sudo` call triggers the
-// same `NeedPassword` prompt via `negotiate` below, with nothing competing for the pty.
-// Also fixes macOS, which used to need a second, separately-ticketed pty for this.
+// No separate sudo pre-check: the script's first `sudo` triggers the same password prompt, and a second
+// process can't claim the pty while the script holds it.
 async fn run_update_or_uninstall(
     action: Action,
     password_rx: &mut UnboundedReceiver<String>,
@@ -100,26 +89,15 @@ async fn finish_script(
     password_rx: &mut UnboundedReceiver<String>,
     tx: &UnboundedSender<ProgressEvent>,
 ) -> Result<(), UpdateError> {
-    // Answers the script's own interactive prompts in order: "update to latest? (Y/n)"
-    // then "which install method?" for update (always "1" - download the precompiled
-    // binary; see the plan's scope decision on why source-method updates stay a manual
-    // `absotui --update` thing), or just "uninstall? (Y/n)" for uninstall (we already
-    // got real confirmation in our own UI before getting here). Written blind and
-    // up front, same as before this file started using a pty: since we already know
-    // these answers regardless of what's on screen, there's no need to wait for the
-    // prompts to actually appear first.
+    // The script's prompts, answered up front: update (Y, then 1 = download the binary) or uninstall (Y,
+    // already confirmed in our own UI).
     let answers = match action {
         Action::Update => "y\n1\n",
         Action::Uninstall => "y\n",
     };
     let _ = pty.write_all(answers.as_bytes()).await;
 
-    // hello_absotui.sh's curl calls are silent (-LsSf, no progress meter), so a real
-    // binary download produces no output at all until it finishes - this timeout is a
-    // hard ceiling on the whole phase, not an inactivity timeout, so it can't tell that
-    // apart from a genuine hang. 180s turned out too tight for a normal download over a
-    // home connection (confirmed live: killed a real update mid-download). Bumped well
-    // above what a slow-but-healthy download/extract/install should ever need.
+    // A ceiling on the whole run, not an inactivity timeout: the script's downloads print nothing until done.
     let (status, saw_prompt) = negotiate(pty, child, password_rx, tx, Duration::from_secs(1800), "running the installer")
         .await
         .map_err(UpdateError::Other)?;
@@ -210,33 +188,9 @@ enum ReadOutcome {
     Prompt,
 }
 
-// Reads from the pty until either the child's side closes (Eof), the current
-// unterminated line has gone quiet for a moment (Prompt) - the same way tools like
-// `expect` tell an info message apart from a real prompt waiting on input - or the
-// child process itself exits (ChildExited), raced against the read on every iteration.
-// That last case matters because pty EOF isn't a reliable signal that the child is
-// done: `sudo` privilege-separates into a monitor process, and if that monitor (or
-// something PAM/fprintd forks) inherits the pty's slave fd without closing its own
-// copy, the kernel never delivers EOF on the master side even after the `sudo` we're
-// actually tracking has already exited - confirmed live, `sudo -k -v` sitting
-// `<defunct>` in `ps` while this loop was still logging quiet spells waiting on data
-// that was never coming. An info message (eg. "Place your finger on the fingerprint
-// reader") is newline-terminated, so a quiet spell right after one leaves `partial`
-// empty and we just keep waiting - that's what covers a fingerprint scan legitimately
-// taking its time. A genuine prompt (eg. "[sudo] password for pdwaldrop: ") is never
-// newline-terminated, so a quiet spell with something left in `partial` means it's
-// actually waiting on us - except `partial` non-empty isn't unique to prompts:
-// dpkg only shows its `\r`-updating "Progress: [ XX%] [###...]" trigger meter when
-// it thinks stdout is a real terminal, which it does here since everything runs
-// through a pty for sudo/fingerprint interactivity - a slow trigger (icon cache,
-// man-db, etc. - installing something like vlc pulls in plenty) can leave `partial`
-// non-empty with no newline for over 500ms, same shape as a real prompt. Confirmed
-// live: this popped the password field mid-`apt install` on two separate VMs where
-// a dependency was actually being installed, well after sudo had already been
-// authenticated once - the user re-entering a password there did nothing but get
-// echoed into dpkg's output, read as a false "NeedPassword" for every such lull.
-// `looks_like_password_prompt` narrows "quiet + unterminated" down to text that
-// actually resembles one, so idle non-prompt output like this no longer qualifies.
+// Reads the pty until EOF, the child exits (EOF isn't reliable: sudo's monitor can keep the pty open), or
+// an unterminated line goes quiet - a prompt. Quiet unterminated output isn't always one (dpkg's progress
+// meter), so `looks_like_password_prompt` must match too.
 async fn read_until_idle_or_eof(
     pty: &mut pty_process::Pty,
     child: &mut tokio::process::Child,

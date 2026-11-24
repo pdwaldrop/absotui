@@ -1,17 +1,9 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-/// Converts a description/subtitle string that may contain HTML markup (as sent by
-/// Audiobookshelf for some libraries/podcasts) into styled lines: `<b>`/`<strong>` and
-/// `<i>`/`<em>` become real bold/italic spans, `<br>`/`<p>`/`<li>` become line breaks
-/// (with `<li>` prefixed by a bullet), and every other tag is just dropped. A literal
-/// `\n` in the source (plenty of descriptions are plain text, not HTML, and still rely
-/// on real newlines to separate a numbered list) breaks the line the same way `<br>`
-/// does - a run of several in a row (`\n\n`) collapses to one blank separator line via
-/// the same path a closing `<p>`/`<div>` uses, since an empty `text` buffer flushes to
-/// an empty `Line`. Unclosed tags degrade gracefully - worst case a style "leaks" to
-/// the end of the text - rather than panicking, since real-world descriptions
-/// occasionally have sloppy markup.
+/// Turns description HTML into styled lines: bold/italic tags become styles, `<br>`/`<p>`/`<li>` and
+/// `\n` break lines, other tags are dropped. Sloppy markup degrades (a style may run on) rather than
+/// panicking.
 pub fn html_to_lines(input: &str) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut spans: Vec<Span<'static>> = Vec::new();

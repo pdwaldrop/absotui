@@ -18,14 +18,8 @@ pub fn section_block(title: &str) -> Block<'static> {
         .border_style(Style::new().fg(ACCENT_STRUCTURE))
 }
 
-// Padding around the key inside a chip's highlight. Not a plain space: footer
-// lines render through `Wrap{trim:true}`, which strips real Unicode whitespace
-// (space, NBSP, everything with the White_Space property - confirmed all are
-// stripped alike) from the very start/end of each wrapped line. Whichever chip
-// lands first on a line would lose its leading pad that way, leaving its key
-// jammed against the highlight's left edge instead of centered like every other
-// chip. U+2800 (Braille Pattern Blank) renders as an empty cell in practice but
-// isn't whitespace by that Unicode property, so it survives the trim.
+// U+2800 (Braille blank) rather than a space: footer wrapping trims real whitespace at line ends, which
+// would eat the pad of a chip that starts a line.
 const CHIP_PAD: char = '\u{2800}';
 
 /// One keybind chip: `keys` rendered as a reverse-video highlighted block,

@@ -1,11 +1,7 @@
 use crate::api::libraries::get_library_perso_view::Root;
 
-// Every collector here pushes exactly one entry per entity - even when
-// media/metadata is missing, in which case a placeholder goes in instead. These
-// arrays are indexed in lockstep with siblings that never skip (ids, progress),
-// so skipping an entity here would silently misalign every index after it (see
-// CLAUDE.md's parallel-arrays warning) - and the pin-to-top reorder in
-// render_home indexes some of them directly, which would panic outright.
+// One entry per entity, even when metadata is missing (a placeholder): these arrays must stay
+// index-aligned with their siblings (see CLAUDE.md's parallel-arrays warning).
 
 /// collect titles
 pub async fn collect_titles_cnt_list(continue_listening: &[Root]) -> Vec<String> {

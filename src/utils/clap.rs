@@ -25,14 +25,8 @@ pub fn clap() {
     }
 }
 
-// Downloads hello_absotui.sh fresh from the stable branch and runs it - no checksum is
-// hardcoded here. An earlier version of this function embedded one directly in the
-// binary, which inevitably went stale the next time the script changed (as it just
-// did) and broke update/uninstall for anyone still on an older binary - exactly the
-// class of bug the script's own checksum handling was already supposed to have
-// eliminated. hello_absotui.sh verifies itself against the latest release's actual
-// published checksum at run time instead (see fetch_expected_checksum there), so
-// there's nothing left for this binary to keep in sync.
+// Fetches hello_absotui.sh fresh from `stable` and runs it; the script checks its own checksum against
+// the latest release, so nothing here has to stay in sync with it.
 fn run_hello_absotui(command: &str) {
     let script = format!(
         r#"tmpfile=$(mktemp) && curl -LsSf https://github.com/pdwaldrop/absotui/raw/stable/hello_absotui.sh -o "$tmpfile" && bash "$tmpfile" {command} && rm -f "$tmpfile""#

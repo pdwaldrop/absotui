@@ -226,22 +226,8 @@ pub async fn handle_l_pod(
                                         if get_is_podcast_autoplay(username.as_str()) == "1"
                                             && current_index + 1 < ids_library_items.len() {
                                                 info!("[handle_l_pod][Finished] Autoplay is on, advancing to next episode");
-                                                // Deliberately NOT setting is_loop_break here - this task
-                                                // is about to keep running for the next episode, not
-                                                // actually exit. `wait_prev_session_finished` (run before
-                                                // any fresh manual play) polls this exact flag to know
-                                                // this background task is done - setting it here on every
-                                                // mid-chain transition let it go stale, so a manual replay
-                                                // of the still-autoplaying episode would see a false "done"
-                                                // and spawn a second task racing this same one over the
-                                                // player and the shared listening_session row.
-                                                //
-                                                // The player doesn't exit on its own at end-of-track, it
-                                                // just goes idle - without explicitly quitting it here
-                                                // (same as every other place that starts new playback
-                                                // does), it keeps holding its control port/socket, and
-                                                // all control/sync ends up silently talking to this
-                                                // now-finished instance instead.
+                                                // No is_loop_break here: this task keeps running for the next episode, and a stale "done" would let a
+                                                // second task start. The finished player still holds the control port, so quit it first.
                                                 let _ = session.quit();
                                                 current_index += 1;
                                                 continue 'episodes;

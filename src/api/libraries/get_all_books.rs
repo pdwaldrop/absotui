@@ -72,12 +72,8 @@ pub struct Metadata {
     pub author: Option<String>,
     pub narrator_name: Option<String>,
     pub series: Option<Vec<Series>>,
-    // The actual shape this server sends today - a flat, packed string like "The
-    // Wheel of Time #3", or "Harry Potter #7, Wizarding World Collection #7" for a
-    // book in more than one series (comma-separated). `series` above is kept too
-    // (it's what Audiobookshelf's own API docs describe) in case a different server
-    // version sends the structured form - see collect_series_library, which
-    // prefers `series` and falls back to parsing this.
+    // What servers actually send: a packed string like "Saga #3" or "A #7, B #7". `series` above is kept in
+    // case a server sends the structured form; collect_series_library prefers it.
     pub series_name: Option<String>,
     pub genres: Option<Vec<String>>,
     pub published_year: Option<String>,
