@@ -2050,3 +2050,26 @@ reads per frame while idle); the podcast-search artwork path live (unit tests on
 
 **Open questions / handoff:** Not committed - waiting on Paul's go-ahead. With this, all ten items from the second review
 and the playback wedge are fixed; none is released yet (v0.12.2 would carry them, with a changelog entry first).
+
+### 2026-11-24 — Claude Code (v0.12.2 release; AUR draft bumped)
+
+**What changed:** With Paul's go-ahead the findings 4-10 work went to `main` as 8546521, then v0.12.2 (patch) was cut. It
+carries everything since v0.12.1: 87202f6 (rejected refresh token no longer retried, refresh in the background, podcast
+Home cursor kept in range), fc56d22 (no playback wedge on Enter with nothing to play) and 8546521 (list scroll positions,
+no per-frame log spam, "0:05" times, `d` on Home refuses what's playing, atomic and checked covers, player bar data only
+while playing). The v0.12.1 changelog entry was frozen and a v0.12.2 one added (d456896); the bump commit is c35e987. The
+AUR draft is at 0.12.2 (only the two tarball checksums changed).
+
+**How it was verified:** `cargo test` (171 passed) and the CI clippy command clean; CI on d456896 passed on ubuntu and macOS
+(the run for 8546521 was cancelled by the newer push, which contains it). Cut Release and Release succeeded on the first
+attempt; all 12 assets are on the release and every file in `SHA256SUMS.txt` matches. The x86_64 binary and AppImage
+report 0.12.2; all three binaries contain the new entry and the frozen v0.12.1 one. Highest glibc requirement unchanged:
+2.34 (x86_64), 2.18 (aarch64); the macOS tarball is a universal binary. `main`, `stable` and the tag sit on the bump commit,
+and the four files the installer fetches from `stable` are byte-identical to the release assets. AUR: `makepkg -f --nodeps`
+passed all four host checksums and the packaged binary reports 0.12.2 with no missing libraries.
+
+**Not verified:** a real `absotui --update` or fresh install; the aarch64 and macOS binaries were inspected, not run; the
+AppImage ran with `APPIMAGE_EXTRACT_AND_RUN`, not through FUSE; the new code on Paul's real server.
+
+**Open questions / handoff:** Paul's installed copy is v0.12.1 until he runs `absotui --update`. Both review rounds are now
+fully released.
