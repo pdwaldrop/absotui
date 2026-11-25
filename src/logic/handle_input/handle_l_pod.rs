@@ -27,14 +27,17 @@ pub async fn handle_l_pod(
 
 ) {
 
-    let Some(token) = token else { return; };
+    let (Some(token), Some(mut current_index)) = (token, selected.filter(|&i| i < ids_library_items.len())) else {
+        // Nothing to play: give the playback slot back, or every later play waits on it.
+        let _ = update_is_loop_break("1", username.as_str());
+        return;
+    };
     // Owned and mutable so the proactive refresh check below (run once per loop
     // iteration) can reassign them in place - a podcast episode (or an autoplay
     // chain of several) can play for well over Audiobookshelf's ~1 hour default
     // access token lifetime.
     let mut token = token.clone();
     let mut refresh_token = refresh_token.cloned().unwrap_or_default();
-    let Some(mut current_index) = selected else { return; };
 
     // Outer loop lets a finished episode advance to the next one in this same
     // podcast's episode list (Podcast Autoplay, toggled in Settings) without leaving

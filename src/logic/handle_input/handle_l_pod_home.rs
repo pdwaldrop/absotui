@@ -32,16 +32,21 @@ pub async fn handle_l_pod_home(
 
 ) {
 
-    let Some(token) = token else { return; };
+    let (Some(token), Some(mut id), Some(mut id_pod_ep)) = (
+        token,
+        selected.and_then(|i| ids_library_items.get(i)).cloned(),
+        selected.and_then(|i| id_pod.get(i)).cloned(),
+    ) else {
+        // Nothing to play: give the playback slot back, or every later play waits on it.
+        let _ = update_is_loop_break("1", username.as_str());
+        return;
+    };
     // Owned and mutable so the proactive refresh check below (run once per loop
     // iteration) can reassign them in place - a Continue Listening episode (or an
     // autoplay chain of several) can play for well over Audiobookshelf's ~1 hour
     // default access token lifetime.
     let mut token = token.clone();
     let mut refresh_token = refresh_token.cloned().unwrap_or_default();
-    let Some(current_index) = selected else { return; };
-    let Some(mut id) = ids_library_items.get(current_index).cloned() else { return; };
-    let Some(mut id_pod_ep) = id_pod.get(current_index).cloned() else { return; };
     // Tracks the currently-playing episode's own published_at, so autoplay can find
     // whatever's genuinely adjacent to it in the live queue's sort order - see
     // next_autoplay_episode.

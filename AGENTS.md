@@ -1990,3 +1990,28 @@ slot back (`is_loop_break` stays "0"). Live: after Enter on a series header, Ent
 last listening session. Please wait..." for 20 s, gave up, and no play request reached the server; the same book plays
 normally without the header press. Fix idea: don't spawn the play task at all when nothing playable is selected, and
 have every early return give the slot back.
+
+### 2026-11-24 — Claude Code (review fixes 1-3 pushed; playback wedge fixed, uncommitted)
+
+**What changed:** With Paul's go-ahead, fixes 1-3 from the entry above went to `main` as 87202f6; CI passed on ubuntu
+and macOS. Then the playback wedge from that entry's last paragraph: Enter where nothing is playable stopped what was
+playing and left the playback slot claimed, so every later play waited 20 s and gave up until a restart.
+- `handle_key` (`src/app.rs`) no longer starts a play task when the selected row isn't playable (a series header in a
+  grouped book Library, an empty Home list, an empty episode list), so nothing is stopped and no slot is claimed.
+- `handle_l_book`, `handle_l_pod` and `handle_l_pod_home` give the slot back (`is_loop_break` "1") when they return
+  early with nothing to play, so the slot can't leak even if a caller passes a bad selection.
+- Playing from an episode list now clones only that podcast's episode ids instead of every podcast's (and the spawned
+  task no longer indexes into the full list).
+
+**How it was verified:** `cargo build`, `cargo test --locked` (168 passed) and the CI clippy command are clean. Live
+against the fake Audiobookshelf (book library with a series, podcast library; own config and runtime folders, mpv with
+null audio on its own socket - Paul's running copy, VLC port and mpv socket untouched): with a book playing, Enter on
+the series header did nothing (same mpv process, position kept advancing, no play request, no "Syncing" message);
+Enter on another book then started it 1.1 s later (before the fix: 20 s wait, then nothing). Enter on an empty podcast
+Home list and on an empty episode list did nothing; once episodes appeared, two plays in a row both reached the server.
+
+**Not verified:** VLC (mpv only), macOS, a real server. No unit test: the play functions write the real database path,
+so this was checked live only.
+
+**Open questions / handoff:** Not committed - waiting on Paul's go-ahead. Remaining review items (4-10 in the entry
+above) are untouched.

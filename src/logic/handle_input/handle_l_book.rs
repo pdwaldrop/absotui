@@ -290,6 +290,9 @@ pub async fn handle_l_book(
                     }
                     }
                 }
+            } else {
+                // Nothing to play: give the playback slot back, or every later play waits on it.
+                let _ = update_is_loop_break("1", username.as_str());
             }
 }
 

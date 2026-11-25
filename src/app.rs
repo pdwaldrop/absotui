@@ -2281,6 +2281,23 @@ pub fn handle_key(&mut self, key: KeyEvent) {
             let podcast_sort_newest_first = self.podcast_sort_newest_first;
             let initial_published_at = selected_cnt_list.and_then(|i| self.podcast_published_at_cnt_list.get(i)).copied();
 
+            // Nothing playable selected (a series header, an empty list): starting a play task would stop what's
+            // playing and find nothing to play.
+            let is_row = |selected: Option<usize>, len: usize| selected.is_some_and(|i| i < len);
+            let nothing_to_play = match self.view_state {
+                AppView::Home => !is_row(selected_cnt_list, if self.is_podcast { ids_cnt_list.len().min(self.ids_ep_cnt_list.len()) } else { ids_cnt_list.len() }),
+                AppView::Library if !self.is_podcast => !is_row(selected_library, ids_library.len()),
+                AppView::SearchBook if !self.is_podcast => !is_row(selected_search_book, ids_search_book.len()),
+                AppView::PodcastEpisode => {
+                    let episodes = if self.is_from_search_pod { &self.ids_pod_ep_search } else { &self.ids_pod_ep };
+                    !is_row(self.list_state_pod_ep.selected(), episodes.len())
+                }
+                _ => false,
+            };
+            if nothing_to_play {
+                return;
+            }
+
             let message = "Loading the media...";
 
             match self.view_state {
@@ -2529,7 +2546,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                     if self.is_from_search_pod {
                         if let Some(index) = selected_search_book
                             && let Some(id_pod) = self.ids_library_pod_search.get(index) {
-                                let all_ids_pod_ep_search_clone = self.all_ids_pod_ep_search.clone();
+                                let episode_ids = self.ids_pod_ep_search.clone();
                                 let id_pod_clone = id_pod.clone();
                                 let selected_pod_ep = self.list_state_pod_ep.selected();
 
@@ -2546,7 +2563,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                                     handle_l_pod(
                                         token.as_ref(),
                                         refresh_token.as_ref(),
-                                        &all_ids_pod_ep_search_clone[index],
+                                        &episode_ids,
                                         selected_pod_ep,
                                         player,
                                         id_pod_clone.as_str(),
@@ -2559,8 +2576,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                     } else {
                         if let Some(index) = selected_library
                             && let Some(id_pod) = ids_library.get(index) {
-                                let all_ids_pod_ep_clone = self.all_ids_pod_ep.clone();
-                                self.ids_pod_ep = all_ids_pod_ep_clone[index].clone();
+                                let episode_ids = self.ids_pod_ep.clone();
                                 let id_pod_clone = id_pod.clone();
                                 let selected_pod_ep = self.list_state_pod_ep.selected();
                                 tokio::spawn(async move {
@@ -2576,7 +2592,7 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                                     handle_l_pod(
                                         token.as_ref(),
                                         refresh_token.as_ref(),
-                                        &all_ids_pod_ep_clone[index],
+                                        &episode_ids,
                                         selected_pod_ep,
                                         player,
                                         id_pod_clone.as_str(),
