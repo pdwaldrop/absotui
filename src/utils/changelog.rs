@@ -1561,8 +1561,7 @@ let changelog_89 = "Changelog Absotui v0.12.0 (21/11/2026) \n\
          Enjoy!\n
          ####\n".to_string();
 
-let changelog_90 = format!(
-    "Changelog Absotui v{VERSION} (24/11/2026) \n\
+let changelog_90 = "Changelog Absotui v0.12.1 (24/11/2026) \n\
          \n\
          Fixed:\n\
          - Pausing right at the start of a track, or jumping back to 0:00\n\
@@ -1580,10 +1579,38 @@ let changelog_90 = format!(
            series, and so does a podcast's episode list.\n\
          \n\
          Enjoy!\n
+         ####\n".to_string();
+
+let changelog_91 = format!(
+    "Changelog Absotui v{VERSION} (24/11/2026) \n\
+         \n\
+         Fixed:\n\
+         - Absotui could crash on podcast Home when the selected episode\n\
+           left New & Unfinished (finished on another device, say) and the\n\
+           list got shorter than where the cursor was.\n\
+         - Pressing Enter where there was nothing to play (a series header,\n\
+           an empty list) stopped what was playing, and every play after\n\
+           that hung on \"Syncing your last listening session\" until you\n\
+           restarted Absotui.\n\
+         - If the server stopped accepting your saved login while Absotui\n\
+           was open (a password change, \"log out all devices\"), Absotui\n\
+           retried hundreds of times a second and filled its log. It now\n\
+           stops after the first refusal and asks you to log in again on\n\
+           restart.\n\
+         - A slow or unreachable server no longer freezes the screen\n\
+           while Absotui renews your login in the background.\n\
+         - Lists keep their place: moving up from the bottom of a long list\n\
+           now moves the cursor instead of scrolling everything under it.\n\
+         - Times under a minute read 0:05 instead of 0:5.\n\
+         - d on Home no longer deletes the download of what's playing.\n\
+         - A broken cached cover is fetched again instead of never showing.\n\
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_91);
     changelog.push_str(&changelog_90);
     changelog.push_str(&changelog_89);
     changelog.push_str(&changelog_88);
