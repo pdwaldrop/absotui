@@ -579,6 +579,8 @@ static IMAGE_PICKER: std::sync::OnceLock<Option<ratatui_image::picker::Picker>> 
 // Same for the update check: once per process, so `R` and library switches don't hit GitHub's rate limit.
 static UPDATE_CHECK: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
 
+const STOP_PLAYBACK_FIRST: &str = "Stop playback first, then remove this download";
+
 // Settings entries by name; look them up with `App::settings_index`, never by position.
 pub(crate) const SETTINGS_LIBRARY: &str = "Library";
 pub(crate) const SETTINGS_PER_ITEM_SPEED: &str = "Per-Item Speed";
@@ -624,9 +626,6 @@ impl App {
         self.settings.iter().position(|s| s == name)
     }
 
-    /// Settings > Player: saves the choice to config.toml and switches `self.player` to
-    /// it. Refused while something is playing (the running session belongs to the other
-    /// player) or when the chosen program isn't installed.
     fn reload_downloads_list(&mut self) {
         self.downloads_list_version = downloads_version();
         self.downloads_list = list_downloads_on_disk(&self.username);
@@ -642,13 +641,17 @@ impl App {
         }
     }
 
+    /// Whether a book or podcast episode is the one playing - its files are in use.
+    fn is_playing_item(&self, item_id: &str) -> bool {
+        get_is_vlc_running(&self.username) == "1"
+            && get_listening_session().ok().flatten().is_some_and(|s| s.id_item == item_id || s.id_pod == item_id)
+    }
+
     fn remove_selected_download(&mut self) {
         let Some(entry) = self.list_state_settings_downloads.selected().and_then(|i| self.downloads_list.get(i)).cloned() else { return };
-        if get_is_vlc_running(&self.username) == "1"
-            && let Ok(Some(session)) = get_listening_session()
-            && (session.id_item == entry.id_item || session.id_pod == entry.id_item) {
-                let _ = pop_message(&mut stdout(), 3, "Stop playback first, then remove this download");
-                return;
+        if self.is_playing_item(&entry.id_item) {
+            let _ = pop_message(&mut stdout(), 3, STOP_PLAYBACK_FIRST);
+            return;
         }
         if let Err(e) = remove_download(&self.username, &entry.id_item) {
             error!("[remove_selected_download] {}: {e}", entry.id_item);
@@ -657,6 +660,9 @@ impl App {
         self.reload_downloads_list();
     }
 
+    /// Settings > Player: saves the choice to config.toml and switches `self.player` to
+    /// it. Refused while something is playing (the running session belongs to the other
+    /// player) or when the chosen program isn't installed.
     fn apply_player_backend(&mut self, backend: Backend) {
         let mut stdout = stdout();
         if get_is_vlc_running(&self.username) == "1" {
@@ -2016,7 +2022,11 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                 && let Some(id) = self._ids_cnt_list.get(i).cloned() {
                     let username = self.username.clone();
                     if is_downloaded(&username, &id) {
-                        let _ = remove_download(&username, &id);
+                        if self.is_playing_item(&id) {
+                            let _ = pop_message(&mut stdout(), 3, STOP_PLAYBACK_FIRST);
+                        } else {
+                            let _ = remove_download(&username, &id);
+                        }
                     } else if let Some(token) = self.token.clone() {
                         let title = self._titles_cnt_list.get(i).cloned().unwrap_or_default();
                         let author = self.auth_names_cnt_list.get(i).cloned().unwrap_or_default();
@@ -2038,7 +2048,11 @@ pub fn handle_key(&mut self, key: KeyEvent) {
                 && let Some(episode_id) = self.ids_ep_cnt_list.get(i).cloned() {
                     let username = self.username.clone();
                     if is_downloaded(&username, &episode_id) {
-                        let _ = remove_download(&username, &episode_id);
+                        if self.is_playing_item(&episode_id) {
+                            let _ = pop_message(&mut stdout(), 3, STOP_PLAYBACK_FIRST);
+                        } else {
+                            let _ = remove_download(&username, &episode_id);
+                        }
                     } else if let Some(token) = self.token.clone()
                         && let Some(podcast_id) = self._ids_cnt_list.get(i).cloned() {
                             let title = self._titles_cnt_list.get(i).cloned().unwrap_or_default();

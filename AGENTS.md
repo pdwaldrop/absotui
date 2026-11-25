@@ -2015,3 +2015,38 @@ so this was checked live only.
 
 **Open questions / handoff:** Not committed - waiting on Paul's go-ahead. Remaining review items (4-10 in the entry
 above) are untouched.
+
+### 2026-11-24 — Claude Code (wedge fix pushed; review findings 4-10 fixed, uncommitted)
+
+**What changed:** The playback-wedge fix went to `main` as fc56d22 with Paul's go-ahead; CI passed on ubuntu and macOS.
+Then findings 4-10 from the second review:
+4. *Lists keep their scroll position:* `render_list` (`src/ui/tui.rs`) now takes an accessor for the list's own
+   `ListState` (`|app| &mut app.list_state_x`) and renders with the real state, so the window stays put while the cursor
+   moves inside it. Drawing an empty list still clears the cursor inside ratatui's logic, so `render_list` restores it
+   afterwards (otherwise j/k would do nothing once rows come back). `render_windowed_list` is unchanged and still matches
+   ratatui's `List` (its tests pass as before).
+5. The two per-frame "No episodes found" warnings in `render_pod_ep` are gone.
+6. `format_time` pads seconds under a minute ("0:05", not "0:5").
+7. `d` on Home refuses to delete the files of the book or episode that's playing, like Settings > Downloads (shared
+   `App::is_playing_item`).
+8. Covers (`src/utils/cover_cache.rs`): every cover is written to a temporary file and renamed into place
+   (`write_cover`), the podcast-search artwork fetch checks the HTTP status, and `load_cached_cover` deletes a cached file
+   that won't decode, so it's fetched once more instead of re-read every frame. Both loaders in `tui.rs` skip all of this
+   when the terminal has no image support.
+9. `player_info` only runs while something is playing (`src/main.rs`).
+10. `apply_player_backend`'s doc comment is back on `apply_player_backend`.
+
+**How it was verified:** `cargo build`, `cargo test --locked` (171 passed: 168 plus `format_time`, the atomic cover
+write and the undecodable-cover removal) and the CI clippy command are clean. Live against the fake Audiobookshelf (own
+config and runtime folders, mpv with null audio; Paul's running copy untouched): Library of 30 - `G` then `k` three times
+keeps the window on 22-30 with the cursor moving to 27 (before: the list scrolled under a cursor stuck on the bottom row),
+and moving past the top edge scrolls by one; search results, Home and Settings lists navigate normally; 0 log lines in 10 s
+on an empty episode list (before: 40); the player bar reads "0:03 / 2:00 | Session: 0:00"; with a downloaded book playing,
+`d` on Home showed "Stop playback first, then remove this download" and kept the file and row, and after `X` the same key
+removed both; a garbage file planted as a cached cover was read once, deleted, fetched once more, and not touched again.
+
+**Not verified:** fix 9's CPU saving was not measured (it removes a session read, a chapter-list parse and a few settings
+reads per frame while idle); the podcast-search artwork path live (unit tests only); VLC, macOS, a real server.
+
+**Open questions / handoff:** Not committed - waiting on Paul's go-ahead. With this, all ten items from the second review
+and the playback wedge are fixed; none is released yet (v0.12.2 would carry them, with a changelog entry first).

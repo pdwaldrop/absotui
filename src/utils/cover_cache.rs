@@ -1,6 +1,7 @@
 use std::env;
 use std::io::Cursor;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use color_eyre::eyre::Result;
 use crate::api::library_items::get_cover::get_cover;
 use crate::api::library_items::get_audio_file_range::get_audio_file_prefix;
@@ -33,6 +34,38 @@ pub fn cover_cache_path(item_id: &str) -> PathBuf {
     covers_dir().join(safe_id)
 }
 
+static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Written beside the final file and renamed into place, so the render loop (which polls for the file)
+/// never reads a half-written cover.
+fn write_cover(path: &Path, bytes: &[u8]) -> Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let temp = path.with_extension(format!("{}-{}.tmp", std::process::id(), TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)));
+    std::fs::write(&temp, bytes)?;
+    if let Err(e) = std::fs::rename(&temp, path) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(e.into());
+    }
+    crate::utils::wake::wake_main_loop();
+    Ok(())
+}
+
+/// The cached cover at `path`, decoded. A file that can't be decoded (cut short, or a format this build
+/// doesn't read) is deleted, so it is fetched once more rather than re-read on every frame.
+pub fn load_cached_cover(path: &Path) -> Option<image::DynamicImage> {
+    let bytes = std::fs::read(path).ok()?;
+    match image::load_from_memory(&bytes) {
+        Ok(image) => Some(image),
+        Err(e) => {
+            log::warn!("[load_cached_cover] {}: {e}", path.display());
+            let _ = std::fs::remove_file(path);
+            None
+        }
+    }
+}
+
 /// Fetches an item's cover and writes it to the local cache, if not already cached.
 /// Meant to be run in a background task - rendering just polls `cover_cache_path` for
 /// the file's existence rather than waiting on this directly.
@@ -43,12 +76,7 @@ pub async fn fetch_and_cache_cover(token: String, item_id: String, server_addres
     }
 
     let bytes = get_cover(&token, &item_id, &server_address).await?;
-
-    std::fs::create_dir_all(covers_dir())?;
-    std::fs::write(path, bytes)?;
-    crate::utils::wake::wake_main_loop();
-
-    Ok(())
+    write_cover(&path, &bytes)
 }
 
 /// Caches a public image URL (e.g. iTunes artwork for a search result) under `cache_key`. Sends no
@@ -60,14 +88,9 @@ pub async fn fetch_and_cache_external_cover(url: String, cache_key: String) -> R
     }
 
     let client = api_client();
-    let response = client.get(url).send().await?;
+    let response = client.get(url).send().await?.error_for_status()?;
     let bytes = response.bytes().await?;
-
-    std::fs::create_dir_all(covers_dir())?;
-    std::fs::write(path, bytes)?;
-    crate::utils::wake::wake_main_loop();
-
-    Ok(())
+    write_cover(&path, &bytes)
 }
 
 /// Fetches a podcast episode's own embedded cover art (from its MP3 ID3 tag) and writes
@@ -96,11 +119,7 @@ pub async fn fetch_and_cache_episode_cover(token: String, episode_id: String, li
         return Ok(());
     };
 
-    std::fs::create_dir_all(covers_dir())?;
-    std::fs::write(path, &picture.data)?;
-    crate::utils::wake::wake_main_loop();
-
-    Ok(())
+    write_cover(&path, &picture.data)
 }
 
 #[cfg(test)]
@@ -127,6 +146,41 @@ mod tests {
         let path = cover_cache_path(malicious);
         assert!(path.starts_with(covers_dir()));
         assert_eq!(path.parent().unwrap(), covers_dir());
+    }
+
+    fn scratch_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("absotui-cover-test-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    const TINY_PNG: &str = "89504e470d0a1a0a0000000d49484452000000030000000208020000001216f14d0000001c49444154789c63382167c37542e3849c0de309391b060606060606003b56046297c2de6b0000000049454e44ae426082";
+
+    fn hex_bytes(hex: &str) -> Vec<u8> {
+        (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect()
+    }
+
+    #[test]
+    fn a_written_cover_is_complete_and_leaves_no_temporary_file() {
+        let dir = scratch_dir("write");
+        let path = dir.join("item-1");
+        write_cover(&path, &hex_bytes(TINY_PNG)).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), hex_bytes(TINY_PNG));
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        assert!(load_cached_cover(&path).is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_undecodable_cover_is_removed_so_it_can_be_fetched_again() {
+        let dir = scratch_dir("bad");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("item-2");
+        std::fs::write(&path, b"<html>404 Not Found</html>").unwrap();
+        assert!(load_cached_cover(&path).is_none());
+        assert!(!path.exists());
+        assert!(load_cached_cover(&path).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

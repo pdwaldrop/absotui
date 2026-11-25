@@ -132,13 +132,12 @@ async fn main() -> Result<()> {
         loop {
 
             let is_playing = get_is_vlc_running(app.username.as_str());
-            let player_info = player_info(app.username.as_str());
+            let player_info = (is_playing == "1").then(|| player_info(app.username.as_str()));
 
-            let window_title = if is_playing == "1" {
-                playing_item_name(&player_info[0]).to_string()
-            } else {
-                String::new()
-            };
+            let window_title = player_info.as_ref()
+                .and_then(|info| info.first())
+                .map(|title| playing_item_name(title).to_string())
+                .unwrap_or_default();
             if last_window_title.as_deref() != Some(window_title.as_str()) {
                 let _ = crossterm::execute!(stdout(), crossterm::terminal::SetTitle(&window_title));
                 last_window_title = Some(window_title);
@@ -158,7 +157,7 @@ async fn main() -> Result<()> {
                 // exactly, and draws on top so it's never clobbered.
                 frame.render_widget(&mut app, frame.area());
 
-                if is_playing == "1" {
+                if let Some(player_info) = player_info {
                     let area = frame.area();
                     render_player(area, frame.buffer_mut(), player_info, app.username.as_str(), app.last_footer_height);
                 }

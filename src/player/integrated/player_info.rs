@@ -138,10 +138,8 @@ pub fn format_time(seconds: u32) -> String {
 
     if hours > 0 {
         format!("{hours}:{minutes:02}:{secs:02}")
-    } else if minutes > 0 {
-        format!("{minutes}:{secs:02}")
     } else {
-        format!("0:{secs}")
+        format!("{minutes}:{secs:02}")
     }
 }
 
@@ -152,6 +150,14 @@ mod tests {
     #[test]
     fn podcast_title_returns_just_the_show_name() {
         assert_eq!(playing_item_name("Ep 42: Big News | The X-Files: Cold Cases"), "The X-Files: Cold Cases");
+    }
+
+    #[test]
+    fn times_keep_two_digit_seconds_under_a_minute_too() {
+        assert_eq!(format_time(0), "0:00");
+        assert_eq!(format_time(5), "0:05");
+        assert_eq!(format_time(65), "1:05");
+        assert_eq!(format_time(3605), "1:00:05");
     }
 
     #[test]

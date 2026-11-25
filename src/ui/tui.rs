@@ -18,7 +18,7 @@ use crate::db::crud::{get_listening_session, get_is_podcast_autoplay, get_is_vlc
 use crate::player::backend::Backend;
 use crate::player::integrated::player_info::{format_time, find_current_chapter};
 use crate::utils::html_to_text::html_to_lines;
-use crate::utils::cover_cache::{cover_cache_path, fetch_and_cache_cover, fetch_and_cache_episode_cover, fetch_and_cache_external_cover};
+use crate::utils::cover_cache::{cover_cache_path, load_cached_cover, fetch_and_cache_cover, fetch_and_cache_episode_cover, fetch_and_cache_external_cover};
 use crate::utils::changelog::latest_changelog_entry;
 use chrono::Datelike;
 use crate::ui::theme;
@@ -304,7 +304,7 @@ impl App {
                 }
             }).collect()
         };
-        self.render_list(list_area, buf, &render_list_title, &display_titles, &mut self.list_state_cnt_list.clone(), progress_info.as_deref());
+        self.render_list(list_area, buf, &render_list_title, &display_titles, |app| &mut app.list_state_cnt_list, progress_info.as_deref());
         if !&self._titles_cnt_list.is_empty() {
             self.render_info_home(item_area1, buf, &self.list_state_cnt_list.clone());
             self.render_desc_home(item_area2, buf, &self.list_state_cnt_list.clone());
@@ -353,7 +353,7 @@ impl App {
 
         App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
         App::render_footer(footer_area, buf, &_text_render_footer);
-        self.render_list(list_area, buf, &render_list_title, &cache.titles, &mut self.list_state_library.clone(), None);
+        self.render_list(list_area, buf, &render_list_title, &cache.titles, |app| &mut app.list_state_library, None);
         // Resolved to the real book index behind the current row selection (a series
         // header has nothing to show here) - see `selected_library_book_index`'s doc
         // comment for why this can't just be `list_state_library` itself. Resolved
@@ -394,7 +394,7 @@ impl App {
 
         App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
         App::render_footer(footer_area, buf, &_text_render_footer);
-        self.render_list(main_area, buf, render_list_title, &rows, &mut self.list_state_collections.clone(), None);
+        self.render_list(main_area, buf, render_list_title, &rows, |app| &mut app.list_state_collections, None);
     }
 
     // Panel heights, shared by the Stats canvas's total height and its layout.
@@ -680,7 +680,7 @@ impl App {
 
         App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
         App::render_footer(footer_area, buf, &_text_render_footer);
-        self.render_list(list_area, buf, render_list_title, &self.settings.clone(), &mut self.list_state_settings.clone(), None);
+        self.render_list(list_area, buf, render_list_title, &self.settings.clone(), |app| &mut app.list_state_settings, None);
         self.render_info_settings(item_area1, buf, &self.list_state_settings.clone());
         self.render_desc_settings(item_area2, buf, &self.list_state_settings.clone());
         if self.is_search_active {
@@ -708,7 +708,7 @@ impl App {
 
         App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
         App::render_footer(footer_area, buf, &text_render_footer);
-        self.render_list(list_area, buf, render_list_title, &self.all_usernames.clone(), &mut self.list_state_settings_account.clone(), None);
+        self.render_list(list_area, buf, render_list_title, &self.all_usernames.clone(), |app| &mut app.list_state_settings_account, None);
 
         if self.account_removal_confirm {
             // ACCENT_ERROR (red), matching render_list's own accent for this screen -
@@ -741,7 +741,7 @@ impl App {
 
         App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
         App::render_footer(footer_area, buf, &text_render_footer);
-        self.render_list(list_area, buf, &render_list_title, &self.libraries_names.clone(), &mut self.list_state_settings_library.clone(), None);
+        self.render_list(list_area, buf, &render_list_title, &self.libraries_names.clone(), |app| &mut app.list_state_settings_library, None);
         self.render_info_settings_library(item_area, buf, &self.list_state_settings_library.clone());
     }
 
@@ -760,7 +760,7 @@ impl App {
 
         App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
         App::render_footer(footer_area, buf, &text_render_footer);
-        self.render_list(list_area, buf, render_list_title, &options, &mut self.list_state_settings_autoplay.clone(), None);
+        self.render_list(list_area, buf, render_list_title, &options, |app| &mut app.list_state_settings_autoplay, None);
         Paragraph::new(format!("Currently: {current}\n\nWhen on, finishing a podcast episode automatically starts the next unfinished one in the list it was played from."))
             .left_aligned()
             .wrap(Wrap { trim: true })
@@ -791,7 +791,7 @@ impl App {
 
         App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
         App::render_footer(footer_area, buf, &text_render_footer);
-        self.render_list(list_area, buf, render_list_title, &options, &mut self.list_state_settings_update_uninstall.clone(), None);
+        self.render_list(list_area, buf, render_list_title, &options, |app| &mut app.list_state_settings_update_uninstall, None);
         self.render_update_uninstall_content(item_area, buf);
     }
 
@@ -876,7 +876,7 @@ impl App {
 
         App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
         App::render_footer(footer_area, buf, &text_render_footer);
-        self.render_list(list_area, buf, render_list_title, &options, &mut self.list_state_settings_per_item_speed.clone(), None);
+        self.render_list(list_area, buf, render_list_title, &options, |app| &mut app.list_state_settings_per_item_speed, None);
         Paragraph::new(format!("Currently: {current}\n\nWhen on, each book or podcast show remembers its own playback speed (O/I in the player) instead of sharing one speed across everything. Turning this on resets every book/show back to 1.0x - each one then adjusts independently from there as you play it, starting fresh at 1.0x the first time. When off, O/I always adjust the single shared speed, same as before this setting existed."))
             .left_aligned()
             .wrap(Wrap { trim: true })
@@ -900,7 +900,7 @@ impl App {
 
         App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
         App::render_footer(footer_area, buf, &text_render_footer);
-        self.render_list(list_area, buf, render_list_title, &options, &mut self.list_state_settings_auto_download.clone(), None);
+        self.render_list(list_area, buf, render_list_title, &options, |app| &mut app.list_state_settings_auto_download, None);
         Paragraph::new(format!("Currently: {current}\n\nWhen on, the {count} most recently played books in Continue Listening, and every episode in Podcasts' New & Unfinished, are automatically downloaded for offline playback (press 'd' on Home to do this manually). Checked each time these lists refresh (opening the app, R, switching libraries - podcasts also refresh every few seconds on their own). Books that fall out of that top-{count} window, or episodes no longer new/unfinished, have their download removed automatically, so disk usage stays bounded rather than growing forever (downloads you made with 'd' are kept - see Settings > Downloads). Change the book count via `auto_download_count` under `[downloads]` in config.toml. Files are hours long, so turning this on can mean several hundred MB to a few GB downloading in the background the moment it's enabled or a new item becomes active."))
             .left_aligned()
             .wrap(Wrap { trim: true })
@@ -928,7 +928,7 @@ impl App {
             let size = format_size(i64::try_from(d.bytes).unwrap_or(i64::MAX));
             (if d.is_auto { format!("{size} auto") } else { size }, 0.0, false)
         }).collect();
-        self.render_list(list_area, buf, &title, &rows, &mut self.list_state_settings_downloads.clone(), Some(&sizes));
+        self.render_list(list_area, buf, &title, &rows, |app| &mut app.list_state_settings_downloads, Some(&sizes));
 
         let selected = self.list_state_settings_downloads.selected().and_then(|i| self.downloads_list.get(i));
         let info = match selected {
@@ -966,7 +966,7 @@ impl App {
 
         App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
         App::render_footer(footer_area, buf, &text_render_footer);
-        self.render_list(list_area, buf, render_list_title, &options, &mut self.list_state_settings_player.clone(), None);
+        self.render_list(list_area, buf, render_list_title, &options, |app| &mut app.list_state_settings_player, None);
         Paragraph::new(format!("Currently: {current}\n\nWhich program plays your audio. VLC is the default; mpv is an alternative. It has to be installed on this machine - Absotui tells you if it isn't. Takes effect the next time you play something, and can't be changed while something is playing. Saved as `backend` under `[player]` in config.toml, so it survives updates. The cvlc, cvlc_term, address and port options in config.toml only apply to VLC."))
             .left_aligned()
             .wrap(Wrap { trim: true })
@@ -1094,7 +1094,7 @@ impl App {
 
         App::render_header(header_area, buf, self.lib_name_type.clone(), &self.username, &self.server_address_pretty, VERSION, &self.update_msg);
         App::render_footer(footer_area, buf, &_text_render_footer);
-        self.render_list(list_area, buf, render_list_title, &titles_search_book_or_pod, &mut self.list_state_search_results.clone(), None);
+        self.render_list(list_area, buf, render_list_title, &titles_search_book_or_pod, |app| &mut app.list_state_search_results, None);
         if !titles_search_book_or_pod.is_empty() {
             self.render_info_search_book(item_area1, buf, &self.list_state_search_results.clone() );
             self.render_desc_search_book(item_area2, buf, &self.list_state_search_results.clone() );
@@ -1122,7 +1122,6 @@ impl App {
 
         if self.is_from_search_pod {
             if self.titles_pod_ep_search.is_empty() {
-                log::warn!("render_pod_ep (search): No episodes found.");
                 Paragraph::new(no_episodes_message)
                     .centered()
                     .block(Block::new().borders(Borders::TOP).border_style(Style::new().fg(Color::DarkGray)))
@@ -1130,13 +1129,12 @@ impl App {
             } else {
                 let items_number = self.titles_pod_ep_search.len();
                 let render_list_title = format!("Episodes [{items_number} items]");
-                self.render_list(list_area, buf, &render_list_title, &self.titles_pod_ep_search.clone(), &mut self.list_state_pod_ep.clone(), None);
+                self.render_list(list_area, buf, &render_list_title, &self.titles_pod_ep_search.clone(), |app| &mut app.list_state_pod_ep, None);
                 self.render_info_pod_ep_search(item_area1, buf, &self.list_state_pod_ep.clone() );
                 self.render_desc_pod_ep_search(item_area2, buf, &self.list_state_pod_ep.clone() );
             }
         } else {
             if self.titles_pod_ep.is_empty() {
-                log::warn!("render_pod_ep (library): No episodes found.");
                 Paragraph::new(no_episodes_message)
                     .centered()
                     .block(Block::new().borders(Borders::TOP).border_style(Style::new().fg(Color::DarkGray)))
@@ -1144,7 +1142,7 @@ impl App {
             } else {
                 let items_number = self.titles_pod_ep.len();
                 let render_list_title = format!("Episodes [{items_number} items]");
-                self.render_list(list_area, buf, &render_list_title, &self.titles_pod_ep.clone(), &mut self.list_state_pod_ep.clone(), None);
+                self.render_list(list_area, buf, &render_list_title, &self.titles_pod_ep.clone(), |app| &mut app.list_state_pod_ep, None);
                 self.render_info_pod_ep(item_area1, buf, &self.list_state_pod_ep.clone() );
                 self.render_desc_pod_ep(item_area2, buf, &self.list_state_pod_ep.clone() );
             }
@@ -1238,7 +1236,7 @@ impl App {
                         _ => title.to_string(),
                     }
                 }).collect();
-                self.render_list(list_area, buf, &render_list_title, &titles, &mut self.list_state_podcast_search_results.clone(), None);
+                self.render_list(list_area, buf, &render_list_title, &titles, |app| &mut app.list_state_podcast_search_results, None);
 
                 if let Some(selected) = self.list_state_podcast_search_results.selected()
                     && let Some(result) = results.get(selected) {
@@ -1325,17 +1323,13 @@ impl App {
     /// separate fetch (no auth, arbitrary host) instead of reusing that function.
     fn load_external_cover_for_selection(&mut self, url: Option<&str>, cache_key: Option<&str>) {
         let (Some(url), Some(cache_key)) = (url, cache_key) else { return };
-        if self.cover_loaded_for_id.as_deref() == Some(cache_key) {
+        if self.image_picker.is_none() || self.cover_loaded_for_id.as_deref() == Some(cache_key) {
             return;
         }
 
         let cache_path = cover_cache_path(cache_key);
-        let dyn_img = if cache_path.exists() {
-            std::fs::read(&cache_path).ok().and_then(|bytes| image::load_from_memory(&bytes).ok())
-        } else {
-            None
-        };
-        let protocol = dyn_img.and_then(|img| self.image_picker.as_ref().map(|picker| picker.new_resize_protocol(img)));
+        let protocol = load_cached_cover(&cache_path)
+            .and_then(|img| self.image_picker.as_ref().map(|picker| picker.new_resize_protocol(img)));
 
         if protocol.is_some() {
             self.cover_protocol = protocol;
@@ -1608,7 +1602,19 @@ impl App {
         hints
     }
 
-    fn render_list(&mut self, area: Rect, buf: &mut Buffer, render_list_title: &str, render_list_items: &[String], list_state: &mut ListState, progress_info: Option<&[(String, f32, bool)]>) {
+    // Takes the list's own state (not a copy), so its scroll position carries over to the next frame.
+    fn render_list(&mut self, area: Rect, buf: &mut Buffer, render_list_title: &str, render_list_items: &[String], state_of: fn(&mut App) -> &mut ListState, progress_info: Option<&[(String, f32, bool)]>) {
+        let mut list_state = std::mem::take(state_of(self));
+        let selected = list_state.selected();
+        self.render_list_with_state(area, buf, render_list_title, render_list_items, &mut list_state, progress_info);
+        // Drawing an empty list clears the cursor; keep it so j/k still work once rows come back.
+        if render_list_items.is_empty() {
+            list_state.select(selected);
+        }
+        *state_of(self) = list_state;
+    }
+
+    fn render_list_with_state(&mut self, area: Rect, buf: &mut Buffer, render_list_title: &str, render_list_items: &[String], list_state: &mut ListState, progress_info: Option<&[(String, f32, bool)]>) {
         let marker_fill_style = Style::default().fg(theme::ACCENT_ACTIVE).add_modifier(Modifier::REVERSED);
         // Deliberately no fg/bg/modifiers here at all - any of those get patched across
         // every cell in the row, overriding the row's own colors (the now-playing
@@ -1865,17 +1871,13 @@ impl App {
     // waiting on the fetch directly - see fetch_and_cache_cover.
     fn load_cover_for_selection(&mut self, selected_id: Option<&str>) {
         let Some(id) = selected_id else { return };
-        if self.cover_loaded_for_id.as_deref() == Some(id) {
+        if self.image_picker.is_none() || self.cover_loaded_for_id.as_deref() == Some(id) {
             return;
         }
 
         let cache_path = cover_cache_path(id);
-        let dyn_img = if cache_path.exists() {
-            std::fs::read(&cache_path).ok().and_then(|bytes| image::load_from_memory(&bytes).ok())
-        } else {
-            None
-        };
-        let protocol = dyn_img.and_then(|img| self.image_picker.as_ref().map(|picker| picker.new_resize_protocol(img)));
+        let protocol = load_cached_cover(&cache_path)
+            .and_then(|img| self.image_picker.as_ref().map(|picker| picker.new_resize_protocol(img)));
 
         if protocol.is_some() {
             self.cover_protocol = protocol;
