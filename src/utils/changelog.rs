@@ -1607,8 +1607,7 @@ let changelog_91 = "Changelog Absotui v0.12.2 (24/11/2026) \n\
          Enjoy!\n
          ####\n".to_string();
 
-let changelog_92 = format!(
-    "Changelog Absotui v{VERSION} (27/11/2026) \n\
+let changelog_92 = "Changelog Absotui v0.12.3 (27/11/2026) \n\
          \n\
          Changed:\n\
          - The shortcuts at the bottom never split a key from its label\n\
@@ -1618,10 +1617,25 @@ let changelog_92 = format!(
            they fit on one row in a narrower window (about 152 columns).\n\
          \n\
          Enjoy!\n
+         ####\n".to_string();
+
+let changelog_93 = format!(
+    "Changelog Absotui v{VERSION} (27/11/2026) \n\
+         \n\
+         Fixed:\n\
+         - Installing and updating (absotui --update, Settings > Update,\n\
+           and the commands in the README) could fail because GitHub's\n\
+           github.com/.../raw/ links were timing out. They now fetch from\n\
+           raw.githubusercontent.com instead.\n\
+         \n\
+         Also new: Absotui is on crates.io, so cargo install absotui works.\n\
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_93);
     changelog.push_str(&changelog_92);
     changelog.push_str(&changelog_91);
     changelog.push_str(&changelog_90);
