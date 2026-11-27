@@ -95,6 +95,7 @@ In `~/.config/absotui` (Linux) or `~/Library/Preferences/absotui` (macOS) — th
 - `db.sqlite3` — SQLite database file (settings, progress, and your saved login, which is encrypted with AES-256-GCM under a key derived from the secret; kept readable only by you)
 - `covers/` — on-disk cache of cover art (populated automatically as covers load)
 - `downloads/` — books and podcast episodes downloaded for offline playback (only appears once you download something)
+- `instance.lock` — lets copies of Absotui running at the same time leave each other's playback alone
 
 In `~/.local/share/applications` (Linux):
 - `absotui.desktop` — lets you launch Absotui from a launcher app
@@ -153,7 +154,7 @@ cd target/release
 ./absotui
 ```
 
-Files installed — same as above (`.env`, `config.toml`, `absotui.log`, `db.sqlite3`, `covers/`, `downloads/`), all under `~/.config/absotui`.
+Files installed — same as above (`.env`, `config.toml`, `absotui.log`, `db.sqlite3`, `covers/`, `downloads/`, `instance.lock`), all under `~/.config/absotui`.
 
 </details>
 
@@ -174,7 +175,7 @@ This uses the same OpenID support as the Audiobookshelf mobile app, so it needs 
 ---
 
 ## 🛠️ Roadmap
-Recent work: you can play through mpv as well as VLC, sign in through your server's SSO (OpenID Connect), and grab the AppImage on Linux. I also spent a while making it lighter, so it uses a lot less CPU while it's open and no longer waits on GitHub to start.
+Recent work: a Settings > Downloads screen that lists everything you've downloaded for offline listening, from every library, and removes what you no longer need. Two rounds of fixes made it steadier: no more crash on podcast Home when an episode leaves the list, no hang after pressing Enter on a series header, and a slow or unreachable server no longer freezes the screen. Lists keep their place as you scroll, and the shortcuts at the bottom fit a narrower window. Earlier: mpv as well as VLC, sign-in through your server's SSO (OpenID Connect), and an AppImage for Linux.
 
 Planned: an AUR package (`absotui-bin`), on hold until AUR registrations reopen.
 

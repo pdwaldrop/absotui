@@ -2117,3 +2117,18 @@ libraries. Paul saw the footer live in his own Ghostty window at 155 columns bef
 AppImage ran with `APPIMAGE_EXTRACT_AND_RUN`, not through FUSE.
 
 **Open questions / handoff:** Paul's installed copy is v0.12.2 until he runs `absotui --update`.
+
+### 2026-11-27 — Claude Code (README refresh and repo topics, uncommitted)
+
+**What changed:** Paul asked what the README needs. Fixed two of the findings: the Roadmap's "Recent work" now covers Settings >
+Downloads, the two rounds of fixes, list scrolling and the footer (mpv, SSO and the AppImage moved to "Earlier"), and "Files
+installed" lists `instance.lock` (created since 0.12.0). Added five GitHub topics: `self-hosted`, `terminal`, `cli`,
+`audiobook-player`, `podcast-player` (repo settings, live now).
+
+**How it was verified:** README claims checked against the code and the v0.12.x changelog; topics read back from the repo.
+
+**Open questions / handoff:** README not committed - waiting on Paul's go-ahead. The demo GIF (2026-10-06) predates a few UI
+changes, but Paul decided it is still representative and stays as is. Still open from the same review: the repo has no social
+preview image; Absotui is not on crates.io or Terminal Trove. AUR registration is still closed (Paul's
+screenshot 2026-11-27; aur-general says the block from the June/July attacks is still in effect, no date) - my earlier "it looks
+open" came from an automated request that got a different page and was wrong.
