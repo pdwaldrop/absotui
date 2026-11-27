@@ -2097,3 +2097,23 @@ age" -> "Sort days" (matching the F and D keys; 156 -> 152 columns). The Keymap 
 **Open questions / handoff:** Not committed - waiting on Paul's go-ahead. A blank row between the Now Playing box's lines was also
 tried at his request and dropped (too tall); the box is unchanged. (Correction: the podcast Home footer was 156 columns, not 166 as
 said above, so it was 1 over.)
+
+### 2026-11-27 — Claude Code (v0.12.3 release; AUR draft bumped)
+
+**What changed:** With Paul's go-ahead the footer change went to `main` as 0691b17 (shortcuts never split from their keys,
+even rows when the footer wraps, podcast Home's "Finish" and "Sort days" so it fits one row at 155 columns), then v0.12.3
+(patch) was cut for it. The v0.12.2 changelog entry was frozen and a v0.12.3 one added (ca8ebe2); the bump commit is 9aa9291.
+The AUR draft is at 0.12.3 (only the two tarball checksums changed). The Now Playing spacing that was tried is not in it.
+
+**How it was verified:** `cargo test` (174 passed) and the CI clippy command clean; CI on ca8ebe2 passed on ubuntu and macOS.
+Cut Release and Release succeeded on the first attempt; all 12 assets are on the release and every file in `SHA256SUMS.txt`
+matches. The x86_64 binary and AppImage report 0.12.3; all three binaries contain the new entry and the frozen v0.12.2 one.
+Highest glibc requirement unchanged: 2.34 (x86_64), 2.18 (aarch64); the macOS tarball is a universal binary. `main`, `stable`
+and the tag sit on the bump commit, and the four files the installer fetches from `stable` are byte-identical to the release
+assets. AUR: `makepkg -f --nodeps` passed all four host checksums and the packaged binary reports 0.12.3 with no missing
+libraries. Paul saw the footer live in his own Ghostty window at 155 columns before the commit.
+
+**Not verified:** a real `absotui --update` or fresh install; the aarch64 and macOS binaries were inspected, not run; the
+AppImage ran with `APPIMAGE_EXTRACT_AND_RUN`, not through FUSE.
+
+**Open questions / handoff:** Paul's installed copy is v0.12.2 until he runs `absotui --update`.
