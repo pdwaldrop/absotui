@@ -10,6 +10,17 @@ keywords = ["audiobookshelf", "audiobooks", "podcasts", "tui", "terminal"]
 categories = ["command-line-utilities", "multimedia::audio"]
 include = ["src/**/*.rs", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE", "config.example.toml"]
 
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-apple-darwin]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-universal-apple-darwin{ archive-suffix }"
+
+[package.metadata.binstall.overrides.aarch64-apple-darwin]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-universal-apple-darwin{ archive-suffix }"
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.13", features = ["json", "query", "gzip"] }
