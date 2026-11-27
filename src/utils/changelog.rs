@@ -1581,8 +1581,7 @@ let changelog_90 = "Changelog Absotui v0.12.1 (24/11/2026) \n\
          Enjoy!\n
          ####\n".to_string();
 
-let changelog_91 = format!(
-    "Changelog Absotui v{VERSION} (24/11/2026) \n\
+let changelog_91 = "Changelog Absotui v0.12.2 (24/11/2026) \n\
          \n\
          Fixed:\n\
          - Absotui could crash on podcast Home when the selected episode\n\
@@ -1606,10 +1605,24 @@ let changelog_91 = format!(
          - A broken cached cover is fetched again instead of never showing.\n\
          \n\
          Enjoy!\n
+         ####\n".to_string();
+
+let changelog_92 = format!(
+    "Changelog Absotui v{VERSION} (27/11/2026) \n\
+         \n\
+         Changed:\n\
+         - The shortcuts at the bottom never split a key from its label\n\
+           any more. When they need two rows, the rows come out even\n\
+           instead of one word left alone on the second.\n\
+         - Podcast Home's shortcuts read \"Finish\" and \"Sort days\", so\n\
+           they fit on one row in a narrower window (about 152 columns).\n\
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_92);
     changelog.push_str(&changelog_91);
     changelog.push_str(&changelog_90);
     changelog.push_str(&changelog_89);
