@@ -2073,3 +2073,27 @@ AppImage ran with `APPIMAGE_EXTRACT_AND_RUN`, not through FUSE; the new code on 
 
 **Open questions / handoff:** Paul's installed copy is v0.12.1 until he runs `absotui --update`. Both review rounds are now
 fully released.
+
+### 2026-11-27 — Claude Code (footer wraps whole shortcuts, uncommitted)
+
+**What changed:** Paul runs Absotui in a third of his monitor (155 columns, read from his terminal's size) and the podcast
+Home footer wrapped with "Quit" alone on the second row, away from its `Q/Esc` key: the footer was one line wrapped word by
+word. `theme::footer_rows` (`src/ui/theme.rs`) now lays the footer out itself: a shortcut (its key chip plus its label) is
+never split, and when the footer needs more than one row the rows are made as even as possible. `render_footer` and
+`footer_row_count` (`src/ui/tui.rs`) use it, so the layout's footer height still matches what is drawn.
+
+**How it was verified:** `cargo build`, `cargo test --locked` (174 passed: 171 plus 3 new - one row when it fits, no split and
+even rows when it doesn't, plain text without chips) and the CI clippy command are clean. Live at 155 columns against a fake
+Audiobookshelf (scratch config; Paul's running copy untouched): podcast Home (166 columns of shortcuts, the only screen that
+doesn't fit) now shows two even rows ending "Q/Esc Quit"; Library (books and podcasts), the episode list, Stats, Settings,
+Settings > Library, Keymap, book Home and Collections each fit on one row. At 80 columns book Home splits into two even rows.
+
+**Not verified:** Paul's own terminal and font; macOS.
+
+Then, at Paul's request, podcast Home's footer labels are shorter so it fits one row at 155: "Finished" -> "Finish" and "Sort by
+age" -> "Sort days" (matching the F and D keys; 156 -> 152 columns). The Keymap screen keeps its longer descriptions. Re-rendered at
+155 columns: one row ending "Q/Esc Quit".
+
+**Open questions / handoff:** Not committed - waiting on Paul's go-ahead. A blank row between the Now Playing box's lines was also
+tried at his request and dropped (too tall); the box is unchanged. (Correction: the podcast Home footer was 156 columns, not 166 as
+said above, so it was 1 over.)

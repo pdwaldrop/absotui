@@ -115,7 +115,7 @@ impl App {
     /// `AppView::Home` rendering
     fn render_home(&mut self, area: Rect, buf: &mut Buffer) {
         let text_render_footer = if self.is_podcast {
-            let mut hints = vec![("l/→", "Play"), ("F", "Finished"), ("d", "Download"), ("/", "Search"), ("D", "Sort by age")];
+            let mut hints = vec![("l/→", "Play"), ("F", "Finish"), ("d", "Download"), ("/", "Search"), ("D", "Sort days")];
             hints.push(Self::FOOTER_SCROLL_DESC);
             hints.extend(Self::footer_trailer("Library", true));
             theme::footer_text(&hints)
@@ -1538,32 +1538,19 @@ impl App {
     /// A wrapped footer gets one blank row after its first line. Rendered off-screen at natural height, then
     /// copied into `area`, which `standard_layout` sized for that one gap row.
     fn render_footer(area: Rect, buf: &mut Buffer, text_render_footer: &Text<'static>) {
-        let content_rows = Self::footer_row_count(text_render_footer, area.width);
-        let offscreen_area = Rect::new(0, 0, area.width, content_rows);
-        let mut offscreen_buf = Buffer::empty(offscreen_area);
-        Paragraph::new(text_render_footer.clone())
-            .centered()
-            .wrap(Wrap { trim: true })
-            .render(offscreen_area, &mut offscreen_buf);
-
-        for row in 0..content_rows {
+        for (row, line) in theme::footer_rows(text_render_footer, area.width).into_iter().enumerate() {
             let gap = if row > 0 { 1 } else { 0 };
-            let target_y = area.y + row + gap;
+            let target_y = area.y + row as u16 + gap;
             if target_y >= area.y + area.height {
                 break;
             }
-            for x in 0..area.width {
-                buf[(area.x + x, target_y)] = offscreen_buf[(x, row)].clone();
-            }
+            Paragraph::new(line).centered().render(Rect::new(area.x, target_y, area.width, 1), buf);
         }
     }
 
     /// How many rows a footer's text actually needs once wrapped at `width`.
     fn footer_row_count(footer_text: &Text<'static>, width: u16) -> u16 {
-        Paragraph::new(footer_text.clone())
-            .wrap(Wrap { trim: true })
-            .line_count(width)
-            .max(1) as u16
+        theme::footer_rows(footer_text, width).len() as u16
     }
 
     /// Header/main/player/refresh/footer split, with the footer sized to its wrapped text at this width.
