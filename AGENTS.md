@@ -2153,3 +2153,14 @@ token saved as `v2:`. `cargo test` (174 passed) and the CI clippy command clean.
 
 **Open questions / handoff:** Not committed - waiting on Paul's go-ahead. The first publish needs Paul's crates.io token (`cargo login`),
 which agents don't handle; then `cargo publish --locked` for 0.12.3.
+
+### 2026-11-27 — Claude Code (first crates.io publish: absotui 0.12.3)
+
+**What changed:** Published absotui 0.12.3 to crates.io from `main` at 48dd04a, using Paul's own `cargo login` token (agents never saw it).
+The first two attempts were refused because the crates.io account had no verified email; Paul verified it, then it went through.
+
+**How it was verified:** `cargo publish --locked` packaged, built and uploaded the crate. The crates.io API reports `absotui` 0.12.3 with the
+expected description. `cargo install --locked absotui` into a scratch folder downloaded it from crates.io, built it, and the binary reports 0.12.3.
+
+**Open questions / handoff:** From now on every release is published too (step 6 in CLAUDE.md's release section). A published version can't be
+deleted, only yanked.
