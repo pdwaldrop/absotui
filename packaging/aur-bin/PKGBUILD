@@ -1,6 +1,6 @@
 # Maintainer: Paul Waldrop <pwaldrop2@gmail.com>
 pkgname=absotui-bin
-pkgver=0.12.4
+pkgver=0.12.5
 pkgrel=1
 pkgdesc="A fun, fast, and intuitive TUI client for Audiobookshelf"
 arch=('x86_64' 'aarch64')
@@ -28,8 +28,8 @@ source=(
     "absotui-${pkgver}.desktop::https://github.com/pdwaldrop/absotui/releases/download/v${pkgver}/absotui.desktop"
     "absotui-${pkgver}.svg::https://github.com/pdwaldrop/absotui/releases/download/v${pkgver}/absotui.svg"
 )
-sha256sums_x86_64=('db325e38045d42a9ca539787bb0c15d2eb4595af593f0f3f534efea1e17678ad')
-sha256sums_aarch64=('730f87a67bebefdba590b4cb645d2d8e9c32010d37b22099e121930c1730f50f')
+sha256sums_x86_64=('0db415d6cc29cb70f8d6d00265ec53b2387a72bd1537b34e08f32f0eb5646ae1')
+sha256sums_aarch64=('ecc665eb688a5f52627fee01fac2a0a82b665670f7a683886a735332b920cec7')
 sha256sums=('f9702f9508049a514d8df8525d90fe7ef9d886285f2f8e8e6009bf77f98f8144'
             '31112a9600a4448c75a94b4f276d14140aed4269a0e72092d3303e9ff34a421f'
             '2fee11a294408461a228d7313a64f64565b171dc2281a354b92690d756d9e509')

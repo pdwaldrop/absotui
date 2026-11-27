@@ -2216,3 +2216,21 @@ it switched his saved library to LibriVox and back (restored to Podcasts-SUPERHO
 startup clean-up of a session his closed copy had left open, and Paul started and fast-forwarded Moby Dick himself (its progress
 synced). Paul's Hyprland uses Lua dispatch (`hyprctl dispatch` expects `hl.dsp...` dispatchers), so resizing windows from a script
 didn't work; he resized it by hand. The WSL 2 audio claim (WSLg) is from documentation, not tested on Windows.
+
+### 2026-11-27 — Claude Code (v0.12.5 release: cargo binstall)
+
+**What changed:** Added a `[package.metadata.binstall]` section to `Cargo.toml` (0c37552) so `cargo binstall absotui` downloads the
+prebuilt tarball from the GitHub release instead of compiling; both macOS targets point at the universal build. It was asked for in a
+comment on Paul's earlier r/audiobookshelf post. Cut v0.12.5 (patch) for it: changelog 87e77d9 (v0.12.4 frozen), bump 373f895.
+Published 0.12.5 to crates.io; AUR draft at 0.12.5 (only the two tarball checksums changed).
+
+**How it was verified:** `cargo test` (174 passed) and the CI clippy command clean; CI green on ubuntu and macOS. Cut Release and Release
+succeeded; all 12 assets present and matching `SHA256SUMS.txt`; the x86_64 binary reports 0.12.5 and carries the new changelog; glibc 2.34;
+macOS tarball universal; `main`, `stable` and the tag on 373f895; the four installer files served from `stable` match the release. The
+published crate's `Cargo.toml` contains the binstall section, and the three URLs it produces for v0.12.5 all resolve; each tarball holds only
+the `absotui` binary at its root, as `bin-dir` expects. AUR: `makepkg -f --nodeps` passed all four host checksums and the packaged binary
+reports 0.12.5.
+
+**Not verified:** cargo-binstall itself was never run (not installed here); the aarch64 and macOS binaries were inspected, not run.
+
+**Open questions / handoff:** A third r/audiobookshelf post (an update from v0.8.5) is drafted for Paul to post himself.
