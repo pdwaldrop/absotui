@@ -2164,3 +2164,27 @@ expected description. `cargo install --locked absotui` into a scratch folder dow
 
 **Open questions / handoff:** From now on every release is published too (step 6 in CLAUDE.md's release section). A published version can't be
 deleted, only yanked.
+
+### 2026-11-27 — Claude Code (v0.12.4 release: install links moved to raw.githubusercontent.com)
+
+**What changed:** GitHub's `github.com/<owner>/<repo>/raw/...` links started answering 504 (repeatedly, with githubstatus.com showing
+nothing), which broke the README's install/update/uninstall one-liners, `absotui --update`, Settings > Update/Uninstall and the crates.io
+page's images (crates.io rewrites relative README images to that form). Every such link now points at `raw.githubusercontent.com`:
+README (also the icon and demo images, 59c376c, plus a new `assets/preview.png`, a frame of the demo GIF, for listings), `hello_absotui.sh`
+(`url_config_file`), `src/logic/update_uninstall.rs`, `src/utils/clap.rs` (6378529). v0.12.4 (patch) was cut for it: changelog ead77b1,
+bump de443cd. Published to crates.io (0.12.4) and the AUR draft is at 0.12.4. Absotui was also submitted to Terminal Trove (Paul submitted
+the form himself; it needs a curator's review).
+
+**How it was verified:** The four files served from `stable` via the new URLs matched the v0.12.3 and then the v0.12.4 `SHA256SUMS.txt`
+(the installer's checksum check is content-based, so the URL change doesn't affect it). `cargo test` (174 passed) and the CI clippy command
+clean; CI passed on ubuntu and macOS. Cut Release and Release succeeded; all 12 assets present and matching `SHA256SUMS.txt`; the x86_64
+binary reports 0.12.4 and carries the new link; glibc 2.34; macOS tarball universal; `main`, `stable` and the tag on the bump commit.
+AUR: `makepkg -f --nodeps` passed all four host checksums and the packaged binary reports 0.12.4. crates.io shows 0.12.4 and its rendered
+README now links the images at raw.githubusercontent.com.
+
+**Not verified:** a real install or `--update` run through the new script on any machine (only the downloads and checksums); aarch64 and macOS
+binaries inspected, not run. Copies already installed (0.12.3 and older) still use the old link for `--update` and Settings > Update until they
+update once by another route (the README command now works); if the 504s persist, users of those versions can't self-update in-app.
+
+**Open questions / handoff:** Note for agents: `cargo clean -p absotui` was needed once because cargo kept reporting a stale debug binary as
+fresh; it also deleted ~68 GB of accumulated build cache in `target/`, which is harmless.
