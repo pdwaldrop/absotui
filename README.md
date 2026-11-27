@@ -1,4 +1,5 @@
 [![GitHub release](https://img.shields.io/github/v/release/pdwaldrop/absotui?label=Latest%20Release&color=green&cacheSeconds=3600)](https://github.com/pdwaldrop/absotui/releases/latest)
+[![crates.io](https://img.shields.io/crates/v/absotui?logo=rust&color=orange)](https://crates.io/crates/absotui)
 [![Release](https://github.com/pdwaldrop/absotui/actions/workflows/release.yml/badge.svg)](https://github.com/pdwaldrop/absotui/actions/workflows/release.yml)
 [![CI](https://github.com/pdwaldrop/absotui/actions/workflows/ci.yml/badge.svg)](https://github.com/pdwaldrop/absotui/actions/workflows/ci.yml)
 [![Security audit](https://github.com/pdwaldrop/absotui/actions/workflows/audit.yml/badge.svg)](https://github.com/pdwaldrop/absotui/actions/workflows/audit.yml)
