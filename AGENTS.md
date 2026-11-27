@@ -2188,3 +2188,31 @@ update once by another route (the README command now works); if the 504s persist
 
 **Open questions / handoff:** Note for agents: `cargo clean -p absotui` was needed once because cargo kept reporting a stale debug binary as
 fresh; it also deleted ~68 GB of accumulated build cache in `target/`, which is harmless.
+
+### 2026-11-27 — Claude Code (promotion and polish after v0.12.4; no code changes)
+
+**What changed:**
+- *Badges and links:* a crates.io version badge in the README (9e6fa07); the repo's About website now points at
+  https://crates.io/crates/absotui; a README line under Installation sends Windows users to WSL 2 (552c0ef). The Sponsor button
+  was already on (FUNDING.yml plus the repo setting).
+- *Lists:* Absotui was on awesome-tuis (PR #900, September) but rothgar/awesome-tuis#1044 removed it on 2026-11-23 under a new
+  "repo must be 6 months old" rule; the repo was created 2026-07-18, so it qualifies again on 2027-01-18. A one-time scheduled task
+  (`absotui-awesome-tuis-readd`, desktop app) fires that morning to check and propose the line; it opens no PR itself. Opened
+  toolleeo/awesome-cli-apps-in-a-csv#714 from Paul's fork, adding absotui to the "music" category (where Toutui, castero and
+  gadacz sit). awesome-rust needs 50 stars or 2,000 crates.io downloads (29 stars today). Audiobookshelf's own site has no
+  third-party apps list.
+- *Social preview:* Paul uploaded a new repo social preview image (GitHub serves it as the og:image). It is a full Tokyo Night
+  screenshot of v0.12.4 on the LibriVox library (Moby Dick in Now Playing, username and server mosaic-blurred) floating over an
+  original generated night-mountain wallpaper, with the icon, a gradient "Absotui" and a two-line tagline in the empty part of
+  Continue Listening. The image is not in the repo (Paul asked for nothing else to be replaced); `assets/preview.png` is still the
+  October demo frame.
+- *Reddit:* a post for r/audiobookshelf was drafted for Paul to review and post himself.
+
+**How it was verified:** README changes are text only (no build needed); the badge URL returns an SVG; `gh repo view` shows the new
+website; the og:image on the repo page changed to the new upload; the CSV entry parses with Python's `csv` module.
+
+**Notes for next time:** the screenshot was taken with a second Absotui instance against Paul's real account, with his permission:
+it switched his saved library to LibriVox and back (restored to Podcasts-SUPERHOME, then Paul changed it himself), ran the normal
+startup clean-up of a session his closed copy had left open, and Paul started and fast-forwarded Moby Dick himself (its progress
+synced). Paul's Hyprland uses Lua dispatch (`hyprctl dispatch` expects `hl.dsp...` dispatchers), so resizing windows from a script
+didn't work; he resized it by hand. The WSL 2 audio claim (WSLg) is from documentation, not tested on Windows.
