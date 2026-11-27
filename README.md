@@ -61,6 +61,8 @@ Actively developed, single-maintainer project. Absotui reads your library and sy
 
 ## 🚀 Installation
 
+Absotui runs on Linux and macOS. On Windows, install it inside [WSL 2](https://learn.microsoft.com/windows/wsl/install) with any of the Linux methods below; WSL 2 plays audio through WSLg.
+
 ### ⚡ Easy installation (install script)
 
 **Run the following in your terminal, then follow the on-screen instructions:**
