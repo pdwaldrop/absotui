@@ -52,6 +52,8 @@ doesn't have to rediscover it.
   backtraces. Revisit only if binary size becomes a real problem (e.g. a distro package asks for it).
 - 2026-11-12 (Paul): Every release includes bumping the AUR draft (`packaging/aur-bin/`), committed and
   pushed as part of cutting the release - no separate go-ahead needed. Steps are in CLAUDE.md's release section.
+- 2026-11-27 (Paul): Every release is also published to crates.io (`cargo publish` after the bump commit), as part of
+  cutting the release - no separate go-ahead needed. The token is Paul's own (`cargo login`). Steps in CLAUDE.md's release section.
 
 ## Dialog
 
@@ -2132,3 +2134,22 @@ changes, but Paul decided it is still representative and stays as is. Still open
 preview image; Absotui is not on crates.io or Terminal Trove. AUR registration is still closed (Paul's
 screenshot 2026-11-27; aur-general says the block from the June/July attacks is still in effect, no date) - my earlier "it looks
 open" came from an automated request that got a different page and was wrong.
+
+### 2026-11-27 — Claude Code (crates.io package prepared, uncommitted)
+
+**What changed:** Paul asked to publish Absotui on crates.io (the name was free). `Cargo.toml` now has the metadata crates.io needs
+(description, `GPL-3.0-only` like the AUR draft, repository, readme, five keywords, two categories) and an `include` list, so the crate
+holds only `src`, `Cargo.toml`, `Cargo.lock`, `README.md`, `LICENSE` and `config.example.toml` (101 files, 245 KB). A `cargo install`
+copy has no example config and no secret key, and Absotui won't start without `config.toml`, so the README has a new "Install with
+Cargo" section with the one-time setup (download the example config from `stable`, generate the key), and says to update with
+`cargo install absotui` - `absotui --update` would delete the Cargo copy and install the script's own in `/usr/local/bin`
+(`check_and_cleanup_binary_install` in `hello_absotui.sh`). Paul decided every release is published to crates.io too (standing
+decision above; step 6 in CLAUDE.md's release section).
+
+**How it was verified:** `cargo publish --dry-run` packaged and built the crate on its own. As a new user: `cargo install --locked
+--path` from the packaged crate into a scratch folder, the README's setup commands run in a scratch config folder (config downloaded
+from the real `stable`, key file 0600), then a login against a fake Audiobookshelf - Home loaded, footer on one row at 155 columns,
+token saved as `v2:`. `cargo test` (174 passed) and the CI clippy command clean.
+
+**Open questions / handoff:** Not committed - waiting on Paul's go-ahead. The first publish needs Paul's crates.io token (`cargo login`),
+which agents don't handle; then `cargo publish --locked` for 0.12.3.

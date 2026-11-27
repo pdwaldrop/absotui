@@ -115,6 +115,22 @@ VLC is used by default. To use `mpv` instead, switch it in **Settings > Player**
 
 On aarch64, use `absotui-aarch64.AppImage` instead. The AppImage includes update information, so AppImageUpdate and AppImageLauncher can find new releases on their own. It's separate from the install script above, so use whichever you prefer.
 
+### 🦀 Install with Cargo
+
+```bash
+cargo install absotui
+```
+
+Then the one-time setup the install script would otherwise do - the config file and a random key that encrypts your saved login (Linux paths shown; on macOS use `~/Library/Preferences/absotui`):
+
+```bash
+mkdir -p ~/.config/absotui
+curl -LsSf https://github.com/pdwaldrop/absotui/raw/stable/config.example.toml -o ~/.config/absotui/config.toml
+(umask 077; echo "ABSOTUI_SECRET_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')" >> ~/.config/absotui/.env)
+```
+
+Playback needs VLC (the default) or mpv installed; switch in **Settings > Player**. Update with `cargo install absotui` again. `absotui --update` (and Settings > Update/Uninstall) would replace the Cargo copy with the install script's own in `/usr/local/bin`.
+
 <details>
 <summary><h3>🔧 Install from source</h3></summary>
 

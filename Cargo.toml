@@ -2,6 +2,13 @@
 name = "absotui"
 version = "0.12.3"
 edition = "2024"
+description = "A fast, keyboard-driven terminal client for Audiobookshelf: audiobooks and podcasts, with progress sync and offline downloads"
+license = "GPL-3.0-only"
+repository = "https://github.com/pdwaldrop/absotui"
+readme = "README.md"
+keywords = ["audiobookshelf", "audiobooks", "podcasts", "tui", "terminal"]
+categories = ["command-line-utilities", "multimedia::audio"]
+include = ["src/**/*.rs", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE", "config.example.toml"]
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
