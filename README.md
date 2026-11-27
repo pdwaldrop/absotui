@@ -65,7 +65,7 @@ Actively developed, single-maintainer project. Absotui reads your library and sy
 **Run the following in your terminal, then follow the on-screen instructions:**
 
 ```bash
-bash -c 'tmpfile=$(mktemp) && curl -LsSf https://github.com/pdwaldrop/absotui/raw/stable/hello_absotui.sh -o "$tmpfile" && bash "$tmpfile" install && rm -f "$tmpfile"'
+bash -c 'tmpfile=$(mktemp) && curl -LsSf https://raw.githubusercontent.com/pdwaldrop/absotui/stable/hello_absotui.sh -o "$tmpfile" && bash "$tmpfile" install && rm -f "$tmpfile"'
 ```
 
 The installer asks which player to use, VLC (the default) or mpv, and installs that one. You can switch later in **Settings > Player** (the other player has to be installed). To skip the question, set `ABSOTUI_PLAYER=vlc` or `ABSOTUI_PLAYER=mpv` before running it.
@@ -74,14 +74,14 @@ The installer asks which player to use, VLC (the default) or mpv, and installs t
 Run `absotui --update`, or quit the app and run the following in your terminal:
 
 ```bash
-bash -c 'tmpfile=$(mktemp) && curl -LsSf https://github.com/pdwaldrop/absotui/raw/stable/hello_absotui.sh -o "$tmpfile" && bash "$tmpfile" update && rm -f "$tmpfile"'
+bash -c 'tmpfile=$(mktemp) && curl -LsSf https://raw.githubusercontent.com/pdwaldrop/absotui/stable/hello_absotui.sh -o "$tmpfile" && bash "$tmpfile" update && rm -f "$tmpfile"'
 ```
 
 #### Uninstall
 Run `absotui --uninstall`, or quit the app and run the following in your terminal:
 
 ```bash
-bash -c 'tmpfile=$(mktemp) && curl -LsSf https://github.com/pdwaldrop/absotui/raw/stable/hello_absotui.sh -o "$tmpfile" && bash "$tmpfile" uninstall && rm -f "$tmpfile"'
+bash -c 'tmpfile=$(mktemp) && curl -LsSf https://raw.githubusercontent.com/pdwaldrop/absotui/stable/hello_absotui.sh -o "$tmpfile" && bash "$tmpfile" uninstall && rm -f "$tmpfile"'
 ```
 
 #### Files installed
@@ -125,7 +125,7 @@ Then the one-time setup the install script would otherwise do - the config file 
 
 ```bash
 mkdir -p ~/.config/absotui
-curl -LsSf https://github.com/pdwaldrop/absotui/raw/stable/config.example.toml -o ~/.config/absotui/config.toml
+curl -LsSf https://raw.githubusercontent.com/pdwaldrop/absotui/stable/config.example.toml -o ~/.config/absotui/config.toml
 (umask 077; echo "ABSOTUI_SECRET_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')" >> ~/.config/absotui/.env)
 ```
 

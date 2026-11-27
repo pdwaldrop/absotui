@@ -2,7 +2,7 @@
 # Install Absotui and dependencies automagically.
 
 # For test from the stable branch
-# bash -c 'tmpfile=$(mktemp) && curl -LsSf https://github.com/pdwaldrop/absotui/raw/stable/hello_absotui.sh -o "$tmpfile" && bash "$tmpfile" install && rm -f "$tmpfile"'
+# bash -c 'tmpfile=$(mktemp) && curl -LsSf https://raw.githubusercontent.com/pdwaldrop/absotui/stable/hello_absotui.sh -o "$tmpfile" && bash "$tmpfile" install && rm -f "$tmpfile"'
 
 set -eo pipefail
 
@@ -10,7 +10,7 @@ main() {
     do_not_run_as_root
 
     # URL variables for production (do not forget to ensure that repo name and branches are correct)
-    url_config_file="https://github.com/pdwaldrop/absotui/raw/stable/config.example.toml"
+    url_config_file="https://raw.githubusercontent.com/pdwaldrop/absotui/stable/config.example.toml"
     url_latest_release="https://api.github.com/repos/pdwaldrop/absotui/releases/latest"
     url_latest_binary="https://github.com/pdwaldrop/absotui/releases/download"
     url_cargo_install="https://github.com/pdwaldrop/absotui"

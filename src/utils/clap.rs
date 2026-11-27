@@ -29,7 +29,7 @@ pub fn clap() {
 // the latest release, so nothing here has to stay in sync with it.
 fn run_hello_absotui(command: &str) {
     let script = format!(
-        r#"tmpfile=$(mktemp) && curl -LsSf https://github.com/pdwaldrop/absotui/raw/stable/hello_absotui.sh -o "$tmpfile" && bash "$tmpfile" {command} && rm -f "$tmpfile""#
+        r#"tmpfile=$(mktemp) && curl -LsSf https://raw.githubusercontent.com/pdwaldrop/absotui/stable/hello_absotui.sh -o "$tmpfile" && bash "$tmpfile" {command} && rm -f "$tmpfile""#
     );
     let status = std::process::Command::new("bash")
         .arg("-c")

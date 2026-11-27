@@ -61,7 +61,7 @@ fn install_script(action: Action) -> String {
         Action::Uninstall => "uninstall",
     };
     format!(
-        r#"tmpfile=$(mktemp) && curl -LsSf https://github.com/pdwaldrop/absotui/raw/stable/hello_absotui.sh -o "$tmpfile" && bash "$tmpfile" {command_word} 2>&1; rc=$?; rm -f "$tmpfile"; exit $rc"#
+        r#"tmpfile=$(mktemp) && curl -LsSf https://raw.githubusercontent.com/pdwaldrop/absotui/stable/hello_absotui.sh -o "$tmpfile" && bash "$tmpfile" {command_word} 2>&1; rc=$?; rm -f "$tmpfile"; exit $rc"#
     )
 }
 
