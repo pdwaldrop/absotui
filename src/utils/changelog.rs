@@ -1619,8 +1619,7 @@ let changelog_92 = "Changelog Absotui v0.12.3 (27/11/2026) \n\
          Enjoy!\n
          ####\n".to_string();
 
-let changelog_93 = format!(
-    "Changelog Absotui v{VERSION} (27/11/2026) \n\
+let changelog_93 = "Changelog Absotui v0.12.4 (27/11/2026) \n\
          \n\
          Fixed:\n\
          - Installing and updating (absotui --update, Settings > Update,\n\
@@ -1631,10 +1630,22 @@ let changelog_93 = format!(
          Also new: Absotui is on crates.io, so cargo install absotui works.\n\
          \n\
          Enjoy!\n
+         ####\n".to_string();
+
+let changelog_94 = format!(
+    "Changelog Absotui v{VERSION} (27/11/2026) \n\
+         \n\
+         New:\n\
+         - cargo binstall absotui now downloads the prebuilt binary from\n\
+           the GitHub release instead of compiling it.\n\
+         - The README points Windows users to WSL 2.\n\
+         \n\
+         Enjoy!\n
          ####\n"
 );
 
 
+    changelog.push_str(&changelog_94);
     changelog.push_str(&changelog_93);
     changelog.push_str(&changelog_92);
     changelog.push_str(&changelog_91);
