@@ -8,14 +8,14 @@
 [![Awesome Ratatui](https://img.shields.io/badge/Awesome-Ratatui-e43716?style=flat&logo=rust&logoColor=white)](https://github.com/ratatui/awesome-ratatui)
 
 <h1 align="center">
-  <img src="linux/absotui.svg" width="75" valign="middle" alt="Absotui icon"> Absotui
+  <img src="https://raw.githubusercontent.com/pdwaldrop/absotui/HEAD/linux/absotui.svg" width="75" valign="middle" alt="Absotui icon"> Absotui
 </h1>
 <p align="center">
     <strong>"ABS" (Audiobookshelf) + "TUI" (terminal user interface)</strong><em> — read it like "absolutely."</em>
 </p>
 
 <p align="center">
-    <img src="assets/demo.gif" alt="📖 Demo">
+    <img src="https://raw.githubusercontent.com/pdwaldrop/absotui/HEAD/assets/demo.gif" alt="📖 Demo">
 </p>
 
 <p align="center">
